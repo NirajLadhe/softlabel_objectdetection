@@ -1,0 +1,45 @@
+DATA:
+  DATASET: 'VinDr-CXR'
+  ROOT: '/home/gagu9230@in.uni-weimar.de/ObjectDetection_SoftLabel/src/dlcv/data/vinbigdata'
+  SOFT_LABEL_FILE_1D: 'home/gagu9230@in.uni-weimar.de/ObjectDetection_SoftLabel/src/dlcv/data/1DGMM_softLabels_clustered_all_with_priors.json'
+  SOFT_LABEL_FILE_2D: 'home/gagu9230@in.uni-weimar.de/ObjectDetection_SoftLabel/src/dlcv/data/1DGMM_softLabels_clustered_all_with_priors.json'
+  HARD_LABEL_FILE: '/home/gagu9230@in.uni-weimar.de/ObjectDetection_SoftLabel/src/dlcv/data/1DGMM_HardLabels_Majority.json'
+  GMM_TYPE: 'HARD_LABEL' 
+  TEST_SPLIT_RATIO: 0.25
+  BALANCED_SAMPLER: False
+  OVERSAMPLE_FACTOR: 1.0
+  IGNORE_NOFINDING: True
+
+MODEL:
+  NUM_CLASSES: 15
+  BACKBONE: 'resnet50'
+  PROBABILISTIC: False  # Standard Faster R-CNN head
+
+MISC:
+  RUN_NAME: 'vindrcxr_hardLabel_resnet50_30epoch_focalLoss_Overfit5'
+  RESULTS_CSV: '/home/gagu9230@in.uni-weimar.de/ObjectDetection_SoftLabel/src/dlcv/results'
+  SAVE_MODEL_PATH: '/home/gagu9230@in.uni-weimar.de/ObjectDetection_SoftLabel/src/dlcv/saved_models'
+  PRETRAINED_WEIGHTS: ''
+  NO_CUDA: False
+
+TRAIN:
+  BASE_LR_BBOX: 0.005
+  BASE_LR_CLASS: 0.0005
+  BASE_LR: 0.001
+  BOX_REG_LOSS_WEIGHT: 10.0
+  MILESTONES: [40, 70]
+  GAMMA: 0.5
+  BATCH_SIZE: 4
+  OVERFIT_BATCHES: 2
+  NUM_EPOCHS: 150
+  EARLY_STOPPING: False
+
+AUGMENTATION:
+  HORIZONTAL_FLIP_PROB: 0.5
+  ROTATION_DEGREES: 10
+  BRIGHTNESS_RANGE: (0.9, 1.1)
+  CONTRAST_RANGE: (0.9, 1.1)
+  NOISE_STD: 0.02
+  RARE_CLASS_INDICES: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+  RARE_CLASS_AUGMENT_PROB: 0.7
+  COMMON_CLASS_AUGMENT_PROB: 0.2

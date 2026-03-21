@@ -1,0 +1,33 @@
+DATA:
+  DATASET: 'VinDr-CXR'
+  ROOT: '/kaggle/input/vinbigdata-original-image-dataset/vinbigdata'
+  SOFT_LABEL_FILE_1D: '/kaggle/input/softlabels-v1/1DGMM_softLabels_clustered_all.json'
+  SOFT_LABEL_FILE_2D: '/kaggle/input/softlabels-v1/2DGMM_softLabels_clustered_all.json'
+  GMM_TYPE: '2D'
+  TEST_SPLIT_RATIO: 0.2
+  BALANCED_SAMPLER: True
+  OVERSAMPLE_FACTOR: 1.0
+MODEL:
+  NUM_CLASSES: 15
+  BACKBONE: 'resnet50'
+  PROBABILISTIC: True
+
+MISC:
+  RUN_NAME: 'vindr_cxr_2d_gmm_resnet50'
+  RESULTS_CSV: '/kaggle/working/repository_content/results'
+  SAVE_MODEL_PATH: '/kaggle/working/repository_content/saved_models'
+  PRETRAINED_WEIGHTS: ''
+  FROZEN_LAYERS: []
+  NO_CUDA: False
+
+TRAIN:
+  BASE_LR: 0.0005
+  MILESTONES: [15, 25]
+  GAMMA: 0.1
+  BATCH_SIZE: 6  # Slightly smaller batch size for 2D GMM due to more complex targets
+  NUM_EPOCHS: 30
+  EARLY_STOPPING: False
+
+AUGMENTATION:
+  HORIZONTAL_FLIP_PROB: 0.5
+  ROTATION_DEGREES: 10 

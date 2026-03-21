@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Outputs and data
+*.json
+*.csv
+results/
+saved_models/
+evaluation_results/
+inference/
+outputs/
+*.png
+
+# Repo-specific
+2DGMM_viz/
+1DGMM_viz/
+texBig_2023/
+Vin-Dr-CXR/
+vindr_cxr/
+priors/
+1DGMM/*.json
+2DGMM/*.json
+HardLabels/*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.venv/
+venv/
+env/

@@ -1,0 +1,42 @@
+DATA:
+  DATASET: 'VinDr-CXR'
+  ROOT: '/kaggle/input/vinbigdata-original-image-dataset/vinbigdata'
+  SOFT_LABEL_FILE_1D: '/kaggle/input/vindrcxr-softlabels/1DGMM_softLabels_clustered_all_with_priors.json'
+  SOFT_LABEL_FILE_2D: '/kaggle/input/vindrcxr-softlabels/2DGMM_softLabels_clustered_all_with_priors.json'
+  HARD_LABEL_FILE: '/kaggle/input/vindrcxr-hardlabels/1DGMM_HardLabels_Majority.json'
+  GMM_TYPE: 'HARD_LABEL' 
+  TEST_SPLIT_RATIO: 0.2
+  BALANCED_SAMPLER: True
+  OVERSAMPLE_FACTOR: 1.0
+
+MODEL:
+  NUM_CLASSES: 15
+  BACKBONE: 'resnet50'
+  PROBABILISTIC: False  # Standard Faster R-CNN head
+
+MISC:
+  RUN_NAME: 'vindr_cxr_hard_label_resnet50'
+  RESULTS_CSV: '/kaggle/working/repository_content/results'
+  SAVE_MODEL_PATH: '/kaggle/working/repository_content/saved_models'
+  PRETRAINED_WEIGHTS: '' #'/kaggle/input/hardlabel-majority-2epoch-resnet50/pytorch/2epochs/2/best_model_hardLabel_Majority_FocalLoss_3Epoch_Resnet50.pth'
+  FROZEN_LAYERS: []
+  NO_CUDA: False
+
+TRAIN:
+  BASE_LR_BBOX: 0.005
+  BASE_LR_CLASS: 0.0005
+  MILESTONES: [15, 25]
+  GAMMA: 0.1
+  BATCH_SIZE: 4
+  NUM_EPOCHS: 3
+  EARLY_STOPPING: True
+
+AUGMENTATION:
+  HORIZONTAL_FLIP_PROB: 0.5
+  ROTATION_DEGREES: 10
+  BRIGHTNESS_RANGE: (0.9, 1.1)
+  CONTRAST_RANGE: (0.9, 1.1)
+  NOISE_STD: 0.02
+  RARE_CLASS_INDICES: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+  RARE_CLASS_AUGMENT_PROB: 0.9
+  COMMON_CLASS_AUGMENT_PROB: 0.2

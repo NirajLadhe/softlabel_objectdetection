@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "softlabel_od"
+version = "0.1.0"
+authors = [
+    { name = "Haaroon Afroz Ognawala", email = "haaroon.afroz.ognawala@uni-weimar.de" },
+]
+description = "Soft label generation and object detection for multi-annotator medical imaging"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "krippendorff",
+    "tqdm",
+    "shapely",
+    "torch",
+    "torchvision",
+    "pytorch-lightning>=2.0",
+    "yacs",
+    "pyyaml",
+    "pycocotools",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "pandas",
+    "iterative-stratification",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "jsonargparse",
+]
+
+[project.scripts]
+softlabel-train = "softlabel_od.scripts.train:main"
+softlabel-train-lightning = "softlabel_od.scripts.train_lightning:main"
+softlabel-pipeline = "softlabel_od.scripts.run_pipeline:main"
+softlabel-evaluate = "softlabel_od.scripts.evaluate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
