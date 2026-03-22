@@ -147,7 +147,7 @@ def calculate_normalized_center_distance(box1: List[float], box2: List[float]) -
 
 def cluster_annotations_by_iou(annotations: List[Dict], iou_threshold: float = 0.5) -> List[List[Dict]]:
     """
-    Cluster annotations using NuCLS methodology (hierarchical clustering with participant constraint).
+    Cluster annotations using NuCLS methodology (Agglomerative Hierarchical Clustering with participant constraint).
     
     Args:
         annotations: List of annotation dictionaries with 'bbox' and 'rater_id' keys

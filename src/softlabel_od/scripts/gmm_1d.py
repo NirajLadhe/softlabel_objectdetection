@@ -31,6 +31,7 @@ from softlabel_od.shared.utils.serialization import NpEncoder
 # Constants
 NO_FINDING_IN_CLUSTER_VOTE = "NoFindingInCluster"
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def compute_class_probs(class_votes, vote_weights):
     """Compute normalized probability distribution for classes based on weighted votes."""
@@ -70,11 +71,11 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate 1D GMM soft labels with class-specific priors."
     )
-    parser.add_argument('--train-csv', type=str, default='vindr_cxr/train_enriched_normalized.csv')
-    parser.add_argument('--raters-json', type=str, default='vindr_cxr/train_vindrcxr_all.json')
-    parser.add_argument('--weights-csv', type=str, default=None)
-    parser.add_argument('--priors', type=str, default='priors/class_priors_1d.json')
-    parser.add_argument('--output', type=str, default='outputs/1DGMM_softLabels_with_priors.json')
+    parser.add_argument('--train-csv', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/train_enriched_normalized.csv'))
+    parser.add_argument('--raters-json', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/train_vindrcxr_all.json'))
+    parser.add_argument('--weights-csv', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/raters_reliability/annotator_reliability_scores_vindrcxr_iou0_5.csv'))
+    parser.add_argument('--priors', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/1d_gaussian_softlabels/priors/class_priors_1d.json'))
+    parser.add_argument('--output', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_with_priors.json'))
     
     # Prior hyperparameters
     parser.add_argument('--alpha', type=float, default=1.0,
@@ -99,7 +100,7 @@ def main():
     
     if args.weights_csv is None:
         safe_iou_str = str(args.iou_reliability).replace('.', '_')
-        args.weights_csv = f'annotator_reliability_vindrcxr/annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv'
+        args.weights_csv = os.path.join(PROJECT_ROOT, 'outputs/raters_reliability/annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv')
     
     ANNOTATOR_WEIGHTS_CSV = args.weights_csv
     TRAIN_CSV_PATH = args.train_csv

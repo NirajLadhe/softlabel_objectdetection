@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 import pytorch_lightning as pl
 
-from softlabel_od.adapters.dlcv.utils import convert_np
+from softlabel_od.object_detection.utils.training_helpers import convert_np
 
 
 def _to_float(x: Any) -> Optional[float]:

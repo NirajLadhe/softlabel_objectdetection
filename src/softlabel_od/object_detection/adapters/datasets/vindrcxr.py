@@ -327,6 +327,8 @@ class Vin_Dr_CXR_SoftLabel_Dataset(DetectionDatasetPort):
         """
         Multilabel iterative stratification by image_id (no leakage across images).
         Requires: pip install iterative-stratification
+        Sechidis K., Tsoumakas G., Vlahavas I. (2011) On the Stratification of Multi-Label Data. In: Gunopulos D., Hofmann T., Malerba D., Vazirgiannis M. (eds) Machine Learning
+        and Knowledge Discovery in Databases. ECML PKDD 2011. Lecture Notes in Computer Science, vol 6913. Springer, Berlin, Heidelberg.
         """
 
         all_image_ids = list(self.image_data.keys())

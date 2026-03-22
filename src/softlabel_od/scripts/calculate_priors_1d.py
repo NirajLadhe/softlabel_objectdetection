@@ -13,15 +13,15 @@ from softlabel_od.softlabel_generation.utils.clustering import (
     VALID_CLUSTERING_METHODS,
 )
 
-
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def main():
     parser = argparse.ArgumentParser(
         description="Pre-compute class-specific variance priors for 1D GMM soft labels."
     )
-    parser.add_argument('--train-csv', type=str, default='vindr_cxr/train_enriched_normalized.csv')
-    parser.add_argument('--raters-json', type=str, default='vindr_cxr/train_vindrcxr_all.json')
+    parser.add_argument('--train-csv', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/train_enriched_normalized.csv'))
+    parser.add_argument('--raters-json', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/train_vindrcxr_all.json'))
     parser.add_argument('--weights-csv', type=str, default=None)
-    parser.add_argument('--output', type=str, default='priors/class_priors_1d.json')
+    parser.add_argument('--output', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/1d_gaussian_softlabels/priors/class_priors_1d.json'))
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--min-samples', type=int, default=5)
     parser.add_argument('--clustering-method', type=str, default='iou', choices=VALID_CLUSTERING_METHODS)
@@ -34,7 +34,7 @@ def main():
 
     if args.weights_csv is None:
         safe_iou_str = str(args.iou_reliability).replace('.', '_')
-        args.weights_csv = f"annotator_reliability_vindrcxr/annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv"
+        args.weights_csv = os.path.join(PROJECT_ROOT, 'outputs/raters_reliability/annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv')
 
     if not os.path.exists(args.train_csv) or not os.path.exists(args.weights_csv):
         print(f"Error: Required file not found.")

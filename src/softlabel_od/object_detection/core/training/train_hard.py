@@ -183,7 +183,7 @@ def validate_hard_labels(model, data_loader, device, comprehensive=False, epoch=
     
     # ===== COMPREHENSIVE METRICS (PHASE 2) =====
     if comprehensive and len(all_predictions) > 0:
-        from softlabel_od.adapters.dlcv.evaluation_metrics import (
+       from softlabel_od.object_detection.core.evaluation.metrics import (
             compute_map,
             compute_calibration_error,
         )

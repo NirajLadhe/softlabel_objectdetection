@@ -14,6 +14,7 @@ from softlabel_od.softlabel_generation.core.reliability_pairwise import (
     compute_reliability_scores,
 )
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def save_pairwise_matrix(matrix, annotators, output_path):
     if not annotators:
@@ -46,7 +47,7 @@ def main():
     parser.add_argument('--iou', type=float, default=0.5)
     parser.add_argument('--no_finding_id', type=int, default=14)
     parser.add_argument('--annotation-path', type=str, default=None)
-    parser.add_argument('--output-dir', type=str, default=None)
+    parser.add_argument('--output-dir', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/raters_reliability/annotator_reliability_vindrcxr'))
     args = parser.parse_args()
 
     annotation_path = args.annotation_path or 'vindr_cxr/train_vindrcxr_all.json'

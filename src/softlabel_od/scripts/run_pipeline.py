@@ -63,14 +63,14 @@ def build_clustering_suffix(args) -> str:
 
 def build_step1_command(args) -> list:
     return [
-        sys.executable, '-m', 'softlabel_od.scripts.manipulate_csv',
+        sys.executable, '-m', 'softlabel_od.softlabel_generation.core.preprocessing.manipulate_csv',
         '--input-csv', args.input_csv, '--output-csv', args.normalized_csv,
     ]
 
 
 def build_step2_command(args) -> list:
     return [
-        sys.executable, '-m', 'softlabel_od.scripts.convert_csv_to_json',
+        sys.executable, '-m', 'softlabel_od.softlabel_generation.core.preprocessing.convert_csv_to_json',
         '--input-csv', args.normalized_csv, '--output-json', args.coco_json,
         '--no-finding-id', str(args.no_finding_id),
     ]
@@ -108,7 +108,7 @@ def build_step5_command(args) -> list:
         sys.executable, '-m', module,
         '--train-csv', args.normalized_csv, '--raters-json', args.coco_json,
         '--weights-csv', args.weights_csv, '--priors', args.priors_path,
-        '--output', args.output_json, '--alpha', str(args.prior_alpha),
+        '--output', args.output_json, '--alpha', str(args.prior-alpha),
         '--clustering-method', args.clustering_method,
         '--iou-threshold', str(args.iou_threshold),
         '--iomin-threshold', str(args.iomin_threshold),
@@ -122,9 +122,9 @@ def main():
     parser.add_argument('--steps', type=int, nargs='+', default=None)
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--gmm-mode', type=str, default='1d', choices=['1d', '2d'])
-    parser.add_argument('--input-csv', type=str, default=os.path.join(PROJECT_ROOT, 'vindr_cxr/train_enriched.csv'))
-    parser.add_argument('--normalized-csv', type=str, default=os.path.join(PROJECT_ROOT, 'vindr_cxr/train_enriched_normalized.csv'))
-    parser.add_argument('--coco-json', type=str, default=os.path.join(PROJECT_ROOT, 'vindr_cxr/train_vindrcxr_all.json'))
+    parser.add_argument('--input-csv', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/train_enriched.csv'))
+    parser.add_argument('--normalized-csv', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/train_enriched_normalized.csv'))
+    parser.add_argument('--coco-json', type=str, default=os.path.join(PROJECT_ROOT, 'outputs/vindrcxr/train_vindrcxr_all.json'))
     parser.add_argument('--iou-reliability', type=float, default=0.5)
     parser.add_argument('--no-finding-id', type=int, default=14)
     parser.add_argument('--clustering-method', type=str, default='iou', choices=['iou', 'iomin', 'iomin_center_gate'])
@@ -138,10 +138,10 @@ def main():
 
     iou_rel_str = safe_threshold_str(args.iou_reliability)
     clustering_suffix = build_clustering_suffix(args)
-    args.reliability_output_dir = os.path.join(PROJECT_ROOT, "annotator_reliability_vindrcxr")
+    args.reliability_output_dir = os.path.join(PROJECT_ROOT, "outputs/raters_reliability/annotator_reliability_vindrcxr")
     args.weights_csv = os.path.join(args.reliability_output_dir, f"annotator_reliability_scores_vindrcxr_iou{iou_rel_str}.csv")
-    args.priors_path = os.path.join(PROJECT_ROOT, "priors", f"class_priors_{args.gmm_mode}_{clustering_suffix}.json")
-    args.output_json = os.path.join(PROJECT_ROOT, "outputs", f"{args.gmm_mode.upper()}GMM_softLabels_{clustering_suffix}_with_priors.json")
+    args.priors_path = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/priors", f"class_priors_{args.gmm_mode}_{clustering_suffix}.json")
+    args.output_json = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels", f"{args.gmm_mode.upper()}GMM_softLabels_{clustering_suffix}_with_priors.json")
 
     steps_to_run = args.steps if args.steps else ALL_STEPS
     invalid = [s for s in steps_to_run if s not in ALL_STEPS]
