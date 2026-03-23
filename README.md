@@ -106,15 +106,18 @@ python -m softlabel_od.scripts.evaluate \
 
 Converts multi-rater annotations into probabilistic labels via five stages:
 
-### Pipeline stages
+<details>
+<summary>Pipeline stages</summary>
 
 1. **Normalize annotations**: Convert to normalized coordinates
 2. **Convert to COCO JSON**: Unified format for processing
 3. **Compute reliability**: Pairwise Krippendorff's Alpha per annotator
 4. **Estimate priors**: Class-specific uncertainty priors from multi-annotated examples
 5. **Generate soft labels**: Weighted Gaussian spatial uncertainty + class distributions
+</details>
 
-### Key features
+<details>
+<summary>Key features</summary>
 
 **Reliability weighting**: Annotators weighted by pairwise inter-annotator agreement (Krippendorff's Alpha)
 
@@ -125,8 +128,10 @@ Converts multi-rater annotations into probabilistic labels via five stages:
 **Bayesian stabilization**: Class-specific priors regularize uncertainty for sparse annotations (VinDr-CXR has ≤3 annotators per image)
 
 **Clustering strategies**: IoU, IoMin, IoMin with center-distance gating
+</details>
 
-### Output format
+<details>
+<summary>Output format</summary>
 
 Each soft label contains:
 ```json
@@ -145,8 +150,10 @@ Each soft label contains:
 ```
 
 Coordinates normalized to [0, 1].
+</details>
 
-### Configuration
+<details>
+<summary>Configuration</summary>
 
 **IoMin clustering:**
 ```bash
@@ -174,12 +181,14 @@ python -m softlabel_od.scripts.run_pipeline --steps 4 5  # priors + labels only
 ```
 
 See `src/softlabel_od/softlabel_generation/README.md` for detailed documentation.
+</details>
 
 ## Object Detection Training
 
 Trains Faster R-CNN models with probabilistic ROI heads to predict spatial uncertainty and class distributions.
 
-### Model architecture
+<details>
+<summary>Model architecture</summary>
 
 **Base detector**: Faster R-CNN with configurable backbones (ResNet50, ResNet101, MobileNet)
 
@@ -190,8 +199,10 @@ Trains Faster R-CNN models with probabilistic ROI heads to predict spatial uncer
 **Uncertainty parameterization**:
 - 1D (primary): Diagonal covariance, per-coordinate independent
 - 2D (experimental): Full covariance matrices at vertices
+</details>
 
-### Loss design
+<details>
+<summary>Loss design</summary>
 
 **Decoupled mean and variance supervision** (not joint Gaussian NLL):
 
@@ -202,8 +213,10 @@ L_cls = -Σ_c q_c log(softmax(logits)_c)
 ```
 
 Decoupling prevents learned attenuation where variance absorbs mean error. Appropriate when ground truth uncertainty is available from annotation aggregation.
+</details>
 
-### Training modes
+<details>
+<summary>Training modes</summary>
 
 **1D soft labels:**
 ```bash
@@ -219,16 +232,20 @@ python -m softlabel_od.scripts.train --config configs/vindr_cxr_hard_label_confi
 ```bash
 python -m softlabel_od.scripts.train_lightning --config configs/vindr_cxr_1d_config.yaml
 ```
+</details>
 
-### Evaluation metrics
+<details>
+<summary>Evaluation metrics</summary>
 
 **Standard detection**: mAP, mAP@50, mAP@75, IoU
 
 **Soft classification**: top-k accuracy, JS divergence, KL divergence, cosine similarity
 
 **Uncertainty quality**: expected IoU, calibration (correlation between predicted uncertainty and actual error)
+</details>
 
-### Configuration
+<details>
+<summary>Configuration</summary>
 
 Edit YAML files in `configs/`. Key parameters:
 
@@ -263,6 +280,9 @@ export SOFTLABEL_OUTPUT_DIR=/path/to/outputs
 ```
 
 See `src/softlabel_od/object_detection/README.md` for detailed documentation.
+
+</details>  
+
 
 ## Configuration Management
 
@@ -380,12 +400,7 @@ VinDr-CXR has ≤3 annotators per image. Naive variance estimation from 1-2 samp
 If you use this repository in your research, please cite:
 
 ```bibtex
-@software{softlabel_object_detection,
-  author = {Haaroon Afroz Ognawala},
-  title = {Soft Label Object Detection: Uncertainty-Aware Detection from Multi-Annotator Medical Imaging},
-  year = {2026},
-  url = {<repository-url>}
-}
+Publication Embargo - do not publish
 ```
 
 ## Acknowledgments
