@@ -8,7 +8,7 @@ version = "0.1.0"
 authors = [
     { name = "Haaroon Afroz Ognawala", email = "haaroon.afroz.ognawala@uni-weimar.de" },
 ]
-description = "Soft label generation and object detection for multi-annotator medical imaging"
+description = "Learning from Disagreement — A Probabilistic Framework for Medical Object Detection"
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
