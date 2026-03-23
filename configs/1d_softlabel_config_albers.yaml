@@ -1,9 +1,9 @@
 DATA:
   DATASET: 'VinDr-CXR'
   ROOT: '/media/klee_ro/public_datasets/vindr_cxr'
-  SOFT_LABEL_FILE_1D: '/home/haaroon/SoftLabel_Generation/1DGMM/1DGMM_softLabels_iou0_5_with_priors.json'
-  SOFT_LABEL_FILE_2D: /home/haaroon/SoftLabel_Generation/1DGMM/1DGMM_softLabels_clustered_all_with_priors.json'
-  HARD_LABEL_FILE: '/home/haaroon/SoftLabel_Generation/HardLabels/1DGMM_HardLabels_Majority.json'
+  SOFT_LABEL_FILE_1D: '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json'
+  SOFT_LABEL_FILE_2D: '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json'
+  HARD_LABEL_FILE: '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json'
   GMM_TYPE: '1D' 
   TEST_SPLIT_RATIO: 0.20
   BALANCED_SAMPLER: True
@@ -17,9 +17,9 @@ MODEL:
   PROBABILISTIC: True
 
 MISC:
-  RUN_NAME: 'SoftLabel_1D_30Epoch_iou0_5_Lambda2_1_1_lr0_0005_WeightedAnn'
-  RESULTS_CSV: '/home/haaroon/ObjectDetection_SoftLabel/src/dlcv/results'
-  SAVE_MODEL_PATH: '/home/haaroon/ObjectDetection_SoftLabel/src/dlcv/saved_models'
+  RUN_NAME: 'SoftLabel_1D_30Epoch_iou0_5_Lambda2_1_1_lr0_001'
+  RESULTS_CSV: '/home/haaroon/softlabel_object_detection/outputs/training_metric_logs'
+  SAVE_MODEL_PATH: '/home/haaroon/softlabel_object_detection/outputs/saved_models'
   PRETRAINED_WEIGHTS: ''
   FROZEN_LAYERS: []
   NO_CUDA: False

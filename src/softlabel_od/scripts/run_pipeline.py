@@ -108,7 +108,7 @@ def build_step5_command(args) -> list:
         sys.executable, '-m', module,
         '--train-csv', args.normalized_csv, '--raters-json', args.coco_json,
         '--weights-csv', args.weights_csv, '--priors', args.priors_path,
-        '--output', args.output_json, '--alpha', str(args.prior-alpha),
+        '--output', args.output_json, '--alpha', str(args.prior_alpha),
         '--clustering-method', args.clustering_method,
         '--iou-threshold', str(args.iou_threshold),
         '--iomin-threshold', str(args.iomin_threshold),

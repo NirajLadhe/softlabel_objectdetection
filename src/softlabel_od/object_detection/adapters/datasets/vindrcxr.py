@@ -10,7 +10,7 @@ import numpy as np
 
 from softlabel_od.object_detection.ports.dataset_port import DetectionDatasetPort
 
-
+project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..'))
 class ToTensor:
     """A simple transform to convert PIL image to tensor."""
     def __call__(self, image, target):
@@ -56,7 +56,8 @@ class Vin_Dr_CXR_SoftLabel_Dataset(DetectionDatasetPort):
     Supports hard labels, 1D and 2D Gaussian Mixture Models.
     """
     def __init__(self, root, label_file, transforms=None, train=True, test_split_ratio=0.2, 
-                 gmm_type='1D', dataset_type='soft', ignore_nofinding_clusters=False, rater_weights_csv='./rater_weights.csv'):
+                 gmm_type='1D', dataset_type='soft', ignore_nofinding_clusters=False, 
+                 rater_weights_csv=os.path.join(project_root_ext, 'outputs/raters_reliability/annotator_reliability_vindrcxr/annotator_reliability_scores_vindrcxr_iou0_5.csv')):
         self.root = root
         self.transforms = transforms
         self.train = train
@@ -430,7 +431,6 @@ class Vin_Dr_CXR_SoftLabel_Dataset(DetectionDatasetPort):
             dominant_class = self.get_dominant_class([finding])
             
             # 3. SKIP "No Finding" (Class 14) - Crucial for Object Detection
-            # We want the model to predict NOTHING for these images, so we give it 0 boxes.
             if dominant_class == 0:
                 continue 
             
@@ -483,8 +483,6 @@ class Vin_Dr_CXR_SoftLabel_Dataset(DetectionDatasetPort):
         }
         
         # Apply transforms (Resize, Flip, etc.)
-        # Note: Transforms will handle resizing boxes to match the *new* image size (e.g. 512x512)
-        # provided we pass the *original pixel coordinates* correctly above.
         if self.transforms:
             img, target = self.transforms(img, target)
         
@@ -539,8 +537,6 @@ class Vin_Dr_CXR_SoftLabel_Dataset(DetectionDatasetPort):
 
             # Convert class probabilities to a tensor
             prob_vector = torch.zeros(15)
-            # main_class = None
-            # max_prob = 0.0
             best_disease_class = None
             max_disease_prob = -1.0
             

@@ -1,5 +1,7 @@
 from yacs.config import CfgNode as CN
 import yaml
+import os
+project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..'))
 
 def get_cfg_defaults():
     """
@@ -13,9 +15,9 @@ def get_cfg_defaults():
     _C.DATA = CN()
     _C.DATA.DATASET = 'VinDr-CXR'
     _C.DATA.ROOT = './data/vinbigdata'
-    _C.DATA.SOFT_LABEL_FILE_1D = './outputs/1DGMM_softLabels_iou0_5_with_priors.json'
-    _C.DATA.SOFT_LABEL_FILE_2D = './outputs/2DGMM_softLabels_iou0_5_with_priors.json'
-    _C.DATA.HARD_LABEL_FILE = './outputs/1DGMM_HardLabels_Majority.json'
+    _C.DATA.SOFT_LABEL_FILE_1D = os.path.join(project_root_ext, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json')
+    _C.DATA.SOFT_LABEL_FILE_2D = os.path.join(project_root_ext, 'outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json')
+    _C.DATA.HARD_LABEL_FILE = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json')
     _C.DATA.GMM_TYPE = '1D'  # Choose between '1D' or '2D' or 'HARD_LABEL'
     _C.DATA.TEST_SPLIT_RATIO = 0.2
     _C.DATA.BALANCED_SAMPLER = True
@@ -56,8 +58,8 @@ def get_cfg_defaults():
     # Miscellaneous settings
     _C.MISC = CN()
     _C.MISC.RUN_NAME = 'vindr_cxr_softlabel_1d'
-    _C.MISC.RESULTS_CSV = './outputs/results'
-    _C.MISC.SAVE_MODEL_PATH = './outputs/saved_models'
+    _C.MISC.RESULTS_CSV = os.path.join(project_root_ext, 'outputs/training_metric_logs')
+    _C.MISC.SAVE_MODEL_PATH = os.path.join(project_root_ext, 'outputs/saved_models')
     _C.MISC.PRETRAINED_WEIGHTS = ''
     _C.MISC.FROZEN_LAYERS = []
     _C.MISC.NO_CUDA = False

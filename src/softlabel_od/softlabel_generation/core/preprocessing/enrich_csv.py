@@ -1,5 +1,6 @@
 """"
-Standalone script to enrich the CSV file with the image dimensions.
+Standalone script to enrich the raw Vindr-CXR CSV file with the image dimensions.
+** Run Once Only **
 """
 import csv
 import json

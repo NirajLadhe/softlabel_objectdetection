@@ -13,7 +13,7 @@ from softlabel_od.object_detection.train import main as train_main
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
-DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "vindr_cxr_1d_config.yaml")
+DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "1d_softlabel_config_albers.yaml")
 
 
 def main():

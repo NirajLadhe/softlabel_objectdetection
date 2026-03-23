@@ -109,7 +109,7 @@ def create_balanced_sampler(
     for c, cnt in cat_img_count.items():
         f_c = cnt / max(1, N)
         ratio = rfs_threshold / max(f_c, 1e-12)
-        r_c[c] = max(1.0, float(ratio ** (alpha / 2.0)))
+        r_c[c] = max(1.0, float(ratio ** alpha))
 
     weights = []
     for present in img_present:
@@ -119,7 +119,11 @@ def create_balanced_sampler(
             w = max(r_c[c] for c in present)
         weights.append(w)
 
-    return WeightedRandomSampler(weights=weights, num_samples=len(weights), replacement=True)
+    return WeightedRandomSampler(
+        weights=weights, 
+        num_samples=int(len(weights)*1.5), # Increase the number of samples to 1.5x the number of images (rare classes see 50% more samples)
+        replacement=True,
+    )
 
 
 # ---------------------------------------------------------------------------
