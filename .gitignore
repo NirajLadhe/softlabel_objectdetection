@@ -25,7 +25,6 @@ outputs/
 texBig_2023/
 Vin-Dr-CXR/
 vindr_cxr/
-priors/
 1DGMM/*.json
 2DGMM/*.json
 HardLabels/*.json
