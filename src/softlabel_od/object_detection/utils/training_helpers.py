@@ -49,10 +49,80 @@ def load_rater_weights(csv_path: str) -> dict:
 # ---------------------------------------------------------------------------
 # Balanced sampler (LVIS-style Repeat Factor Sampling)
 # ---------------------------------------------------------------------------
+def summarize_balanced_sampler(
+    dataset,
+    img_ids,
+    img_present,
+    cat_img_count,
+    r_c,
+    weights,
+    rfs_threshold,
+    presence_prob_thresh,
+    ignore_nofinding,
+    nofinding_weight,
+):
+    """
+    Print a debug summary for Repeat Factor Sampling.
+
+    This is split out from create_balanced_sampler() so the sampling math stays
+    readable and the same summary can be reused elsewhere if needed.
+    """
+    import numpy as np
+
+    N = len(img_ids)
+    idx_to_class = {idx: name for name, idx in dataset.class_to_idx.items()}
+
+    print("Creating balanced sampler (RFS)...")
+    print(f"  N images: {N}")
+    print(f"  dataset: {dataset.__class__.__name__}")
+    print(f"  label_mode: {getattr(dataset, 'label_mode', 'unknown')}")
+    print(f"  presence_prob_thresh: {presence_prob_thresh}")
+    print(f"  rfs_threshold: {rfs_threshold}")
+    print(f"  ignore_nofinding: {ignore_nofinding}")
+    print(f"  nofinding_weight: {nofinding_weight}")
+
+    num_pure_nofinding = sum(1 for present in img_present if not present)
+    print(
+        f"  Pure NoFinding images (no disease present): "
+        f"{num_pure_nofinding} ({num_pure_nofinding / max(N, 1) * 100:.1f}%)"
+    )
+
+    total_present = sum(cat_img_count.values())
+    print("\nClass presence in training set (image-level):")
+    for class_idx in sorted(cat_img_count.keys()):
+        count = cat_img_count[class_idx]
+        class_name = idx_to_class.get(class_idx, f"Class {class_idx}")
+        print(f"  {class_name} ({class_idx}): {count} images ({count / max(N, 1) * 100:.2f}%)")
+    if total_present == 0:
+        print("  (no disease classes present under current threshold)")
+
+    print("\nRFS repeat factors (category-level):")
+    for class_idx in sorted(r_c.keys()):
+        count = cat_img_count[class_idx]
+        f_c = count / max(1, N)
+        class_name = idx_to_class.get(class_idx, f"Class {class_idx}")
+        print(f"  {class_name} ({class_idx}): f_c={f_c:.6f}, r_c={r_c[class_idx]:.3f}")
+    if not r_c:
+        print("  (no foreground categories received repeat factors)")
+
+    weights_np = np.array(weights, dtype=np.float32)
+    nonzero = int((weights_np > 0).sum())
+
+    print("\nImage sampling weights summary:")
+    print(f"  nonzero-weight images: {nonzero}/{N}")
+    print(f"  min/mean/max: {weights_np.min():.3f} / {weights_np.mean():.3f} / {weights_np.max():.3f}")
+
+    topk = min(10, N)
+    if topk > 0:
+        top_idx = weights_np.argsort()[-topk:][::-1]
+        print(f"\nTop-{topk} sampled images (weight, num_classes_present):")
+        for j in top_idx:
+            print(f"  {img_ids[j]}: w={weights_np[j]:.3f}, |C|={len(img_present[j])}")
 
 def create_balanced_sampler(
     dataset,
     rfs_threshold=0.01,
+    oversample_factor=None,
     presence_prob_thresh=0.1,
     ignore_nofinding=False,
     alpha=0.5,
@@ -62,7 +132,7 @@ def create_balanced_sampler(
     Repeat Factor Sampling (RFS) for long-tailed detection datasets.
 
     Args:
-        dataset:              A Vin_Dr_CXR_SoftLabel_Dataset instance.
+        dataset:              Any DetectionDatasetPort-compatible dataset.
         rfs_threshold:        Frequency threshold t (typical: 0.001–0.01).
         presence_prob_thresh: Soft-label disease presence threshold.
         ignore_nofinding:     Give pure No-Finding images a low weight.
@@ -73,34 +143,17 @@ def create_balanced_sampler(
     Returns:
         WeightedRandomSampler
     """
-    img_ids = dataset.image_ids
+    if oversample_factor is not None:
+        rfs_threshold = oversample_factor
+
+    img_ids = dataset.get_image_ids()
     N = len(img_ids)
 
     img_present = []
     cat_img_count = Counter()
 
     for img_id in img_ids:
-        labels = dataset.image_data[img_id]
-        present = set()
-
-        if dataset.dataset_type == "soft":
-            for cl in labels:
-                mean_box = (cl.get("spatial") or {}).get("mean")
-                if mean_box and mean_box[2] >= 0.99 and mean_box[3] >= 0.99:
-                    continue
-                probs = cl.get("class_probs", {}) or {}
-                for name, p in probs.items():
-                    if name in dataset.class_to_idx and p >= presence_prob_thresh:
-                        present.add(dataset.class_to_idx[name])
-        else:
-            for finding in labels:
-                if "renormalized_class_probs" in finding:
-                    for name, p in (finding.get("renormalized_class_probs") or {}).items():
-                        if name in dataset.class_to_idx and p >= presence_prob_thresh:
-                            present.add(dataset.class_to_idx[name])
-                elif "class" in finding and finding["class"] in dataset.class_to_idx:
-                    present.add(dataset.class_to_idx[finding["class"]])
-
+        present = dataset.get_presence_labels(img_id, threshold=presence_prob_thresh)
         img_present.append(present)
         for c in present:
             cat_img_count[c] += 1
@@ -119,6 +172,18 @@ def create_balanced_sampler(
             w = max(r_c[c] for c in present)
         weights.append(w)
 
+    summarize_balanced_sampler(
+        dataset=dataset,
+        img_ids=img_ids,
+        img_present=img_present,
+        cat_img_count=cat_img_count,
+        r_c=r_c,
+        weights=weights,
+        rfs_threshold=rfs_threshold,
+        presence_prob_thresh=presence_prob_thresh,
+        ignore_nofinding=ignore_nofinding,
+        nofinding_weight=nofinding_weight,
+    )
     return WeightedRandomSampler(
         weights=weights, 
         num_samples=int(len(weights)*1.5), # Increase the number of samples to 1.5x the number of images (rare classes see 50% more samples)

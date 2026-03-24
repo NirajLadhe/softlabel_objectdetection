@@ -11,8 +11,8 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import MultiStepLR
 
-from softlabel_od.object_detection.utils.config import get_cfg_defaults, get_cfg_from_file
-from softlabel_od.object_detection.adapters.datasets.vindrcxr import Vin_Dr_CXR_SoftLabel_Dataset
+from softlabel_od.object_detection.adapters.datasets import build_detection_dataset
+from softlabel_od.object_detection.utils.config import get_cfg_from_file, resolve_label_mode
 from softlabel_od.object_detection.utils.training_helpers import (
     collate_fn,
     create_balanced_sampler,
@@ -28,29 +28,22 @@ from softlabel_od.object_detection.core.model.factory import get_model
 
 def main(cfg):
     # ── Determine label file and dataset type ──────────────────────────────
-    if cfg.DATA.GMM_TYPE == "HARD_LABEL":
-        dataset_type = "hard"
-        label_file = cfg.DATA.HARD_LABEL_FILE
-        gmm_type = None
+    label_mode = resolve_label_mode(cfg)
+    if label_mode == "hard":
         model_type = "hard"
+    elif label_mode == "soft_1d":
+        model_type = "1d"
+    elif label_mode == "soft_2d":
+        model_type = "2d"
     else:
-        dataset_type = "soft"
-        gmm_type = cfg.DATA.GMM_TYPE
-        model_type = cfg.DATA.GMM_TYPE.lower()
-        if cfg.DATA.GMM_TYPE == "1D":
-            label_file = cfg.DATA.SOFT_LABEL_FILE_1D
-        elif cfg.DATA.GMM_TYPE == "2D":
-            label_file = cfg.DATA.SOFT_LABEL_FILE_2D
-        else:
-            raise ValueError(f"Unsupported GMM type: {cfg.DATA.GMM_TYPE}")
+        raise ValueError(f"Unsupported label mode: {label_mode}")
 
     if not os.path.exists(cfg.DATA.ROOT):
         print(f"Warning: Dataset root not found: {cfg.DATA.ROOT}")
-    if not os.path.exists(label_file):
-        print(f"Warning: Label file not found: {label_file}")
 
     print(f"Config: {getattr(cfg, 'CONFIG_FILE_PATH', 'N/A')}")
-    print(f"GMM type: {cfg.DATA.GMM_TYPE}")
+    print(f"Dataset: {cfg.DATA.DATASET}")
+    print(f"Label mode: {label_mode}")
     print(cfg.dump())
 
     device = torch.device("cuda" if torch.cuda.is_available() and not cfg.MISC.NO_CUDA else "cpu")
@@ -70,26 +63,10 @@ def main(cfg):
 
     # ── Datasets ───────────────────────────────────────────────────────────
     print("Initialising training dataset...")
-    train_dataset = Vin_Dr_CXR_SoftLabel_Dataset(
-        root=cfg.DATA.ROOT,
-        label_file=label_file,
-        transforms=train_transform,
-        train=True,
-        test_split_ratio=cfg.DATA.TEST_SPLIT_RATIO,
-        gmm_type=gmm_type,
-        dataset_type=dataset_type,
-    )
+    train_dataset = build_detection_dataset(cfg, train=True, transforms=train_transform)
 
     print("Initialising validation dataset...")
-    val_dataset = Vin_Dr_CXR_SoftLabel_Dataset(
-        root=cfg.DATA.ROOT,
-        label_file=label_file,
-        transforms=test_transform,
-        train=False,
-        test_split_ratio=cfg.DATA.TEST_SPLIT_RATIO,
-        gmm_type=gmm_type,
-        dataset_type=dataset_type,
-    )
+    val_dataset = build_detection_dataset(cfg, train=False, transforms=test_transform)
 
     # ── DataLoaders ────────────────────────────────────────────────────────
     if cfg.DATA.BALANCED_SAMPLER:
@@ -114,7 +91,7 @@ def main(cfg):
             print("Filtering No-Finding images...")
             valid_indices = [
                 idx for idx in range(len(train_dataset))
-                if train_dataset.get_dominant_class(train_dataset.image_data[train_dataset.image_ids[idx]]) != 0
+                if train_dataset.get_dominant_class(image_id=train_dataset.image_ids[idx]) != 0
             ]
             print(f"Kept {len(valid_indices)}/{len(train_dataset)} images.")
             sampler = torch.utils.data.SubsetRandomSampler(valid_indices)
@@ -250,7 +227,7 @@ def main(cfg):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train VinDr-CXR object detection model")
+    parser = argparse.ArgumentParser(description="Train Probabilistic Object Detection model")
     parser.add_argument("--config", type=str, required=True, help="Path to config YAML")
     args = parser.parse_args()
 

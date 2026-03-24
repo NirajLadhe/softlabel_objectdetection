@@ -2,21 +2,17 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from softlabel_od.object_detection.adapters.datasets.vindrcxr import Vin_Dr_CXR_SoftLabel_Dataset
+from softlabel_od.object_detection.adapters.datasets import build_detection_dataset
 from softlabel_od.object_detection.utils.training_helpers import collate_fn, create_balanced_sampler
 from softlabel_od.object_detection.utils.augmentations import ClassConditionalAugmentation, MinimalAugmentation
 
 
 class VinDrHardDataModule(pl.LightningDataModule):
     """
-    Hard-label DataModule.
+    Hard-label DataModule built on the dataset registry.
 
-    Preserves:
-    - Dataset's internal stratified split (Vin_Dr_CXR_SoftLabel_Dataset.create_stratified_split)
-    - Balanced sampling via create_balanced_sampler
-    - Same augmentations as train.py
-    - Optional IGNORE_NOFINDING filtering
-    - Optional deterministic overfit subset when TRAIN.OVERFIT_BATCHES != 0
+    The class name is kept for compatibility with the current Lightning entry
+    point, while the selected dataset comes from config.
     """
 
     def __init__(self, cfg):
@@ -27,10 +23,6 @@ class VinDrHardDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         cfg = self.cfg
-
-        label_file = cfg.DATA.HARD_LABEL_FILE
-        dataset_type = "hard"
-        gmm_type = None
 
         train_transform = ClassConditionalAugmentation(
             rare_class_indices=cfg.AUGMENTATION.RARE_CLASS_INDICES,
@@ -43,22 +35,13 @@ class VinDrHardDataModule(pl.LightningDataModule):
         )
         val_transform = MinimalAugmentation()
 
-        self.train_dataset = Vin_Dr_CXR_SoftLabel_Dataset(
-            root=cfg.DATA.ROOT,
-            label_file=label_file,
-            transforms=train_transform,
-            train=True,
-            test_split_ratio=cfg.DATA.TEST_SPLIT_RATIO,
-            gmm_type=gmm_type,
-            dataset_type=dataset_type,
-        )
+        self.train_dataset = build_detection_dataset(cfg, train=True, transforms=train_transform)
 
         # Optional: remove "No Finding" images (dominant class == 0) from training
         if getattr(cfg.DATA, "IGNORE_NOFINDING", False):
             kept = []
             for img_id in self.train_dataset.image_ids:
-                labels = self.train_dataset.image_data[img_id]
-                dominant = self.train_dataset.get_dominant_class(labels)
+                dominant = self.train_dataset.get_dominant_class(image_id=img_id)
                 if dominant != 0:
                     kept.append(img_id)
             self.train_dataset.image_ids = kept
@@ -92,15 +75,7 @@ class VinDrHardDataModule(pl.LightningDataModule):
                 f"({cfg.TRAIN.OVERFIT_BATCHES} batches × {cfg.TRAIN.BATCH_SIZE})"
             )
 
-        self.val_dataset = Vin_Dr_CXR_SoftLabel_Dataset(
-            root=cfg.DATA.ROOT,
-            label_file=label_file,
-            transforms=val_transform,
-            train=False,
-            test_split_ratio=cfg.DATA.TEST_SPLIT_RATIO,
-            gmm_type=gmm_type,
-            dataset_type=dataset_type,
-        )
+        self.val_dataset = build_detection_dataset(cfg, train=False, transforms=val_transform)
 
     def train_dataloader(self):
         cfg = self.cfg

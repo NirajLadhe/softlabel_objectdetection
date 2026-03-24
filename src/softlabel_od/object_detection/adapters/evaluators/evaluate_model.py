@@ -26,13 +26,10 @@ import numpy as np
 from collections import Counter
 from tqdm import tqdm
 
-from softlabel_od.object_detection.adapters.datasets.vindrcxr import (
-    Vin_Dr_CXR_SoftLabel_Dataset,
-    Compose,
-    ToTensor,
-)
+from softlabel_od.object_detection.adapters.datasets import get_dataset_class
 from softlabel_od.object_detection.adapters.model_components.faster_rcnn_1d import get_model_1d
 from softlabel_od.object_detection.utils.training_helpers import collate_fn
+from softlabel_od.object_detection.utils.transforms import Compose, ToTensor
 from softlabel_od.object_detection.core.evaluation.metrics import (
     compute_map,
     compute_expected_iou,
@@ -200,20 +197,19 @@ def evaluate(args):
 
     # ── Determine dataset / model type ──
     is_hard = args.gmm_type == 'HARD_LABEL'
-    dataset_type = 'hard' if is_hard else 'soft'
-    gmm_type = None if is_hard else args.gmm_type
     probabilistic = not is_hard
+    label_mode = "hard" if is_hard else f"soft_{args.gmm_type.lower()}"
 
     # ── Build validation dataset (deterministic split via random_state=42) ──
-    print(f"\nCreating {dataset_type} validation dataset...")
-    val_dataset = Vin_Dr_CXR_SoftLabel_Dataset(
+    print(f"\nCreating {label_mode} validation dataset...")
+    dataset_cls = get_dataset_class(args.dataset)
+    val_dataset = dataset_cls(
         root=args.data_root,
         label_file=args.label_file,
         transforms=Compose([ToTensor()]),
         train=False,
         test_split_ratio=args.test_split_ratio,
-        gmm_type=gmm_type,
-        dataset_type=dataset_type,
+        label_mode=label_mode,
     )
 
     val_loader = torch.utils.data.DataLoader(
@@ -348,7 +344,7 @@ def evaluate(args):
     print(f"Results saved to: {output_path}")
     print("=" * 70)
 
-data_root = cfg.DATA.DATA_ROOT
+data_root = cfg.DATA.ROOT
 evaluation_results_dir = cfg.MISC.EVALUATION_RESULTS_DIR
 1d_gaussian_softlabels_dir = cfg.DATA.SOFT_LABEL_FILE_1D
 2d_gaussian_softlabels_dir = cfg.DATA.SOFT_LABEL_FILE_2D
@@ -365,8 +361,10 @@ if __name__ == '__main__':
     parser.add_argument('--label_file', type=str, default=None,
                         help='Path to label JSON (auto-selected if not provided)')
     parser.add_argument('--data_root', type=str,
-                        default='./data/vinbigdata',
+                        default=data_root,
                         help='Dataset root directory')
+    parser.add_argument('--dataset', type=str, default=cfg.DATA.DATASET,
+                        help='Registered dataset adapter name')
     parser.add_argument('--output', type=str, default=evaluation_results_dir,
                         help='Output JSON path (auto-named if not provided)')
     parser.add_argument('--batch_size', type=int, default=4)
