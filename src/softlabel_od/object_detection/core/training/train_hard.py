@@ -320,15 +320,14 @@ def train_and_evaluate_model_hard(model, train_loader, val_loader, optimizer, nu
         "val_calibration_error": [],
     }
 
-    results_dir = f"{cwd}/results/{config_name}"
+    results_dir = cfg.MISC.RESULTS_CSV
+    run_name = cfg.MISC.RUN_NAME
     os.makedirs(results_dir, exist_ok=True)
-    metrics_file_path = os.path.join(results_dir, "training_metrics.json")
-    saved_model_dir = cwd + f"/saved_models/{config_name}"
-    saved_model_path = os.path.join(saved_model_dir, "models")
-    os.makedirs(saved_model_path, exist_ok=True)
-
+    metrics_file_path = os.path.join(results_dir, f"{run_name}_training_metrics.json")
+    saved_model_dir = cfg.MISC.SAVE_MODEL_PATH
+    os.makedirs(saved_model_dir, exist_ok=True)
     print(f"Starting Hard Label Training")
-    print(f"Results: {results_dir}")
+    print(f"Results: {results_dir}/{run_name}")
     print(f"Epochs: {num_epochs}")
     print(f"Mode: Deterministic (Standard Faster R-CNN)")
     print(f"Comprehensive eval: Every {comprehensive_eval_freq} epochs")
@@ -388,7 +387,7 @@ def train_and_evaluate_model_hard(model, train_loader, val_loader, optimizer, nu
             if val_metrics['avg_loss'] < best_val_loss:
                 best_val_loss = val_metrics['avg_loss']
                 consecutive_no_improvement = 0
-                best_model_path = os.path.join(saved_model_path, "best_model.pth")
+                best_model_path = os.path.join(saved_model_dir, f"{run_name}_best_model.pth")
                 torch.save(model.state_dict(), best_model_path)
                 print(f"  ✅ New best! Saved to {best_model_path}")
             else:
@@ -409,6 +408,7 @@ def train_and_evaluate_model_hard(model, train_loader, val_loader, optimizer, nu
     print(f"✅ Training Complete!")
     print(f"📊 Best validation loss: {best_val_loss:.4f}")
     print(f"💾 Metrics saved to: {metrics_file_path}")
+    print(f"💾 Model saved to: {saved_model_dir}/{run_name}_best_model.pth")
     print(f"{'='*60}")
     
     return metrics_history

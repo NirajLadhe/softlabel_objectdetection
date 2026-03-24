@@ -370,9 +370,12 @@ def train_and_evaluate_model_1d(model, train_loader, val_loader, optimizer, num_
         "learning_rate": [],
     }
 
-    results_dir = cfg.MISC.RESULTS_CSV + f"/{config_name}"
+    results_dir = cfg.MISC.RESULTS_CSV
+    run_name = cfg.MISC.RUN_NAME
     os.makedirs(results_dir, exist_ok=True)
-    metrics_file_path = os.path.join(results_dir, "training_metrics_phase_1.json")
+    metrics_file_path = os.path.join(results_dir, f"{run_name}_training_metrics.json")
+    saved_model_dir = cfg.MISC.SAVE_MODEL_PATH
+    os.makedirs(saved_model_dir, exist_ok=True)
 
     print(f" Starting 1D GMM Training")
     print(f" Results: {results_dir}")
@@ -443,7 +446,7 @@ def train_and_evaluate_model_1d(model, train_loader, val_loader, optimizer, num_
         if composite > best_composite_score + MIN_DELTA['composite']:
             best_composite_score = composite
             consecutive_no_improvement = 0
-            best_model_path = os.path.join(results_dir, "best_model.pth")
+            best_model_path = os.path.join(saved_model_dir, f"{run_name}_best_model.pth")
             torch.save(model.state_dict(), best_model_path)
             print(f"  New best composite={composite:.4f} — saved checkpoint")
         else:

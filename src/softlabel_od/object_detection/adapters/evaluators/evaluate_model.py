@@ -42,6 +42,8 @@ from softlabel_od.object_detection.core.evaluation.metrics import (
     compute_class_distribution_metrics,
     match_predictions_to_gt,
 )
+from softlabel_od.object_detection.utils.config import get_cfg_defaults
+cfg = get_cfg_defaults()
 
 CLASS_MAPPING = {
     0: 'No Finding', 1: 'Aortic enlargement', 2: 'Atelectasis',
@@ -346,6 +348,11 @@ def evaluate(args):
     print(f"Results saved to: {output_path}")
     print("=" * 70)
 
+data_root = cfg.DATA.DATA_ROOT
+evaluation_results_dir = cfg.MISC.EVALUATION_RESULTS_DIR
+1d_gaussian_softlabels_dir = cfg.DATA.SOFT_LABEL_FILE_1D
+2d_gaussian_softlabels_dir = cfg.DATA.SOFT_LABEL_FILE_2D
+hard_labels_dir = cfg.DATA.HARD_LABEL_FILE
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Evaluate object detection model")
@@ -360,7 +367,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_root', type=str,
                         default='./data/vinbigdata',
                         help='Dataset root directory')
-    parser.add_argument('--output', type=str, default='/home/haaroon/softlabel_object_detection/outputs/evaluation_results',
+    parser.add_argument('--output', type=str, default=evaluation_results_dir,
                         help='Output JSON path (auto-named if not provided)')
     parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--num_classes', type=int, default=15)
@@ -373,9 +380,9 @@ if __name__ == '__main__':
     # Auto-select label file based on gmm_type
     if args.label_file is None:
         if args.gmm_type == '1D':
-            args.label_file = '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json'
+            args.label_file = 1d_gaussian_softlabels_dir
         else:
-            args.label_file = '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json'
+            args.label_file = hard_labels_dir
         print(f"Auto-selected label file: {args.label_file}")
 
     evaluate(args)

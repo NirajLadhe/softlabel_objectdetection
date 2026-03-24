@@ -1,10 +1,10 @@
 """
-Extract hard labels from 1D GMM soft labels - MAJORITY VOTE approach.
+Extract hard labels from 1D Gaussian Uncertainty soft labels - MAJORITY VOTE approach.
 
 This script respects majority vote decisions.
 IMPORTANT: True "No Finding" images (where all annotators agreed) are INCLUDED.
 
-Usage: python 1DGMM_HardLabels_Majority.py
+Usage: python -m softlabel_od.softlabel_generation.core.label_assembly.label_constructor.hardlabels_majority
 """
 
 import json

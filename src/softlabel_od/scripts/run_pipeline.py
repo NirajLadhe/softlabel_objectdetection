@@ -78,14 +78,19 @@ def build_step2_command(args) -> list:
 
 def build_step3_command(args) -> list:
     return [
-        sys.executable, '-m', 'softlabel_od.scripts.calculate_pairwise_reliability',
+        sys.executable, '-m', 'softlabel_od.softlabel_generation.core.reliability.calculate_pairwise_reliability',
         '--iou', str(args.iou_reliability), '--no_finding_id', str(args.no_finding_id),
         '--annotation-path', args.coco_json, '--output-dir', args.reliability_output_dir,
     ]
 
 
 def build_step4_command(args) -> list:
-    module = 'softlabel_od.scripts.calculate_priors_1d' if args.gmm_mode == '1d' else 'softlabel_od.scripts.calculate_priors_2d'
+    if args.gmm_mode == '1d':
+        module = 'softlabel_od.softlabel_generation.core.label_assembly.priors.calculate_priors_1d'
+    elif args.gmm_mode == '2d':
+        module = 'softlabel_od.softlabel_generation.core.label_assembly.priors.calculate_priors_2d'
+    else:
+        raise ValueError(f"Invalid GMM mode: {args.gmm_mode}")
     cmd = [
         sys.executable, '-m', module,
         '--train-csv', args.normalized_csv, '--raters-json', args.coco_json,
@@ -103,7 +108,12 @@ def build_step4_command(args) -> list:
 
 
 def build_step5_command(args) -> list:
-    module = 'softlabel_od.scripts.gmm_1d' if args.gmm_mode == '1d' else 'softlabel_od.scripts.gmm_2d'
+    if args.gmm_mode == '1d':
+        module = 'softlabel_od.softlabel_generation.core.label_assembly.label_constructor.gmm_1d'
+    elif args.gmm_mode == '2d':
+        module = 'softlabel_od.softlabel_generation.core.label_assembly.label_constructor.gmm_2d'
+    else:
+        raise ValueError(f"Invalid GMM mode: {args.gmm_mode}")
     return [
         sys.executable, '-m', module,
         '--train-csv', args.normalized_csv, '--raters-json', args.coco_json,
