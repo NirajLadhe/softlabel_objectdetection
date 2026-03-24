@@ -1,9 +1,9 @@
 DATA:
   DATASET: 'VinDr-CXR'
   ROOT: '/media/klee_ro/public_datasets/vindr_cxr'
-  SOFT_LABEL_FILE_1D: '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json'
-  SOFT_LABEL_FILE_2D: '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json'
-  HARD_LABEL_FILE: '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json'
+  SOFT_LABEL_FILE_1D: '../outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json'
+  SOFT_LABEL_FILE_2D: '../outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json'
+  HARD_LABEL_FILE: '../outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json'
   GMM_TYPE: '1D' 
   TEST_SPLIT_RATIO: 0.20
   BALANCED_SAMPLER: True
@@ -18,8 +18,9 @@ MODEL:
 
 MISC:
   RUN_NAME: 'SoftLabel_1D_30Epoch_iou0_5_Lambda2_1_1_lr0_001'
-  RESULTS_CSV: '/home/haaroon/softlabel_object_detection/outputs/training_metric_logs'
-  SAVE_MODEL_PATH: '/home/haaroon/softlabel_object_detection/outputs/saved_models'
+  RESULTS_CSV: '../outputs/training_metric_logs'
+  SAVE_MODEL_PATH: '../outputs/saved_models'
+  EVALUATION_RESULTS_DIR: '../outputs/evaluation_results'
   PRETRAINED_WEIGHTS: ''
   FROZEN_LAYERS: []
   NO_CUDA: False
@@ -33,7 +34,7 @@ TRAIN:
   MILESTONES: [20, 25]
   GAMMA: 0.5
   BATCH_SIZE: 4
-  OVERFIT_BATCHES: 0
+  OVERFIT_BATCHES: 1
   NUM_EPOCHS: 1
   EARLY_STOPPING: True
 

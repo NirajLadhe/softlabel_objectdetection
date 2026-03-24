@@ -1,7 +1,7 @@
 from yacs.config import CfgNode as CN
 import yaml
 import os
-project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..'))
+project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
 
 def get_cfg_defaults():
     """
@@ -60,11 +60,34 @@ def get_cfg_defaults():
     _C.MISC.RUN_NAME = 'vindr_cxr_softlabel_1d'
     _C.MISC.RESULTS_CSV = os.path.join(project_root_ext, 'outputs/training_metric_logs')
     _C.MISC.SAVE_MODEL_PATH = os.path.join(project_root_ext, 'outputs/saved_models')
+    _C.MISC.EVALUATION_RESULTS_DIR = os.path.join(project_root_ext, 'outputs/evaluation_results')
     _C.MISC.PRETRAINED_WEIGHTS = ''
     _C.MISC.FROZEN_LAYERS = []
     _C.MISC.NO_CUDA = False
 
     return _C.clone()
+
+def _resolve_paths_relative_to_config(cfg, cfg_file):
+    """Turn non-absolute path strings in cfg into paths relative to the config file directory."""
+    base = os.path.dirname(os.path.abspath(cfg_file))
+    def resolve(section_name, key):
+        section = getattr(cfg, section_name)
+        val = getattr(section, key)
+        if not isinstance(val, str) or not val.strip():
+            return
+        if os.path.isabs(val):
+            return
+        resolved = os.path.normpath(os.path.join(base, val))
+        setattr(section, key, resolved)
+    # resolve("DATA", "ROOT")
+    resolve("DATA", "SOFT_LABEL_FILE_1D")
+    resolve("DATA", "SOFT_LABEL_FILE_2D")
+    resolve("DATA", "HARD_LABEL_FILE")
+    resolve("MISC", "RESULTS_CSV")
+    resolve("MISC", "SAVE_MODEL_PATH")
+    resolve("MISC", "EVALUATION_RESULTS_DIR")
+    resolve("MISC", "PRETRAINED_WEIGHTS")
+
 
 def get_cfg_from_file(cfg_file):
     """
@@ -79,5 +102,6 @@ def get_cfg_from_file(cfg_file):
 
     cfg = get_cfg_defaults()
     cfg.merge_from_other_cfg(CN(cfg_dict))
+    _resolve_paths_relative_to_config(cfg, cfg_file)
     cfg.freeze()
     return cfg

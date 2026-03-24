@@ -9,7 +9,7 @@ import csv
 import numpy as np
 import argparse
 
-from softlabel_od.softlabel_generation.core.reliability_pairwise import (
+from softlabel_od.softlabel_generation.core.reliability.reliability_pairwise import (
     calculate_pairwise_kalpha,
     compute_reliability_scores,
 )

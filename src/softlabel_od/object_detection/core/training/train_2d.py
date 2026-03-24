@@ -109,7 +109,7 @@ def train_and_evaluate_model_2d(model, train_loader, val_loader, optimizer, num_
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 consecutive_no_improvement = 0
-                best_model_path = os.path.join(results_dir, "best_model.pth")
+                best_model_path = os.path.join(saved_model_dir, f"{run_name}_best_model.pth")
                 torch.save(model.state_dict(), best_model_path)
                 print(f"  New best model saved! (Val Loss: {val_loss:.4f})")
             else:
