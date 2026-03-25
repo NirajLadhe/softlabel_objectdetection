@@ -13,8 +13,10 @@ def get_cfg_defaults():
 
     # Data settings
     _C.DATA = CN()
-    _C.DATA.DATASET = 'VinDr-CXR'
+    _C.DATA.DATASET = 'vindrcxr'
     _C.DATA.ROOT = './data/vinbigdata'
+    _C.DATA.LABEL_MODE = ''
+    _C.DATA.LABEL_FILE = ''
     _C.DATA.SOFT_LABEL_FILE_1D = os.path.join(project_root_ext, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json')
     _C.DATA.SOFT_LABEL_FILE_2D = os.path.join(project_root_ext, 'outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json')
     _C.DATA.HARD_LABEL_FILE = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json')
@@ -24,6 +26,7 @@ def get_cfg_defaults():
     _C.DATA.OVERSAMPLE_FACTOR = 1.0
     _C.DATA.IGNORE_NOFINDING = False
     _C.DATA.NOFINDING_WEIGHT_GIVEN = False
+    _C.DATA.OPTIONS = CN(new_allowed=True)
     # Model settings
     _C.MODEL = CN()
     _C.MODEL.NUM_CLASSES = 15  # 14 pathology classes + 1 background/no finding
@@ -70,6 +73,7 @@ def get_cfg_defaults():
 def _resolve_paths_relative_to_config(cfg, cfg_file):
     """Turn non-absolute path strings in cfg into paths relative to the config file directory."""
     base = os.path.dirname(os.path.abspath(cfg_file))
+
     def resolve(section_name, key):
         section = getattr(cfg, section_name)
         val = getattr(section, key)
@@ -79,7 +83,28 @@ def _resolve_paths_relative_to_config(cfg, cfg_file):
             return
         resolved = os.path.normpath(os.path.join(base, val))
         setattr(section, key, resolved)
-    # resolve("DATA", "ROOT")
+
+    def resolve_option_paths(node):
+        if not isinstance(node, CN):
+            return
+        for key, value in node.items():
+            if isinstance(value, CN):
+                resolve_option_paths(value)
+                continue
+            if not isinstance(value, str) or not value.strip() or os.path.isabs(value):
+                continue
+            key_lower = key.lower()
+            if (
+                key_lower.endswith("_path")
+                or key_lower.endswith("_file")
+                or key_lower.endswith("_dir")
+                or key_lower.endswith("_csv")
+                or key_lower == "root"
+            ):
+                node[key] = os.path.normpath(os.path.join(base, value))
+
+    resolve("DATA", "ROOT")
+    resolve("DATA", "LABEL_FILE")
     resolve("DATA", "SOFT_LABEL_FILE_1D")
     resolve("DATA", "SOFT_LABEL_FILE_2D")
     resolve("DATA", "HARD_LABEL_FILE")
@@ -87,6 +112,42 @@ def _resolve_paths_relative_to_config(cfg, cfg_file):
     resolve("MISC", "SAVE_MODEL_PATH")
     resolve("MISC", "EVALUATION_RESULTS_DIR")
     resolve("MISC", "PRETRAINED_WEIGHTS")
+    resolve_option_paths(cfg.DATA.OPTIONS)
+
+
+def resolve_label_mode(cfg):
+    """Resolve the canonical label mode from config values."""
+    explicit_mode = getattr(cfg.DATA, "LABEL_MODE", "")
+    if isinstance(explicit_mode, str) and explicit_mode.strip():
+        return explicit_mode
+
+    gmm_type = getattr(cfg.DATA, "GMM_TYPE", "1D")
+    if gmm_type == "HARD_LABEL":
+        return "hard"
+    if gmm_type == "2D":
+        return "soft_2d"
+    return "soft_1d"
+
+
+def resolve_label_file(cfg):
+    """Resolve the active label file for the selected label mode."""
+    explicit_file = getattr(cfg.DATA, "LABEL_FILE", "")
+    if isinstance(explicit_file, str) and explicit_file.strip():
+        return explicit_file
+
+    label_mode = resolve_label_mode(cfg)
+    if label_mode == "hard":
+        return cfg.DATA.HARD_LABEL_FILE
+    if label_mode == "soft_2d":
+        return cfg.DATA.SOFT_LABEL_FILE_2D
+    return cfg.DATA.SOFT_LABEL_FILE_1D
+
+
+def cfg_node_to_dict(node):
+    """Convert nested YACS nodes to a plain dict."""
+    if isinstance(node, CN):
+        return {key: cfg_node_to_dict(value) for key, value in node.items()}
+    return node
 
 
 def get_cfg_from_file(cfg_file):
