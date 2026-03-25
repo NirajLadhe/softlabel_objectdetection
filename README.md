@@ -365,19 +365,7 @@ python -m softlabel_od.scripts.run_pipeline --dry-run
 Dataset extension is now config-driven on the object detection side.
 
 **Object detection workflow**
-1. Create a dataset adapter under `src/softlabel_od/object_detection/adapters/datasets/`
-2. Subclass `CanonicalDetectionDataset` when possible
-3. Implement:
-   - `build_class_to_idx()`
-   - `resolve_image_path()`
-4. Register the adapter once in `src/softlabel_od/object_detection/adapters/datasets/__init__.py`
-5. Add a user-specific YAML config with:
-   - `DATA.DATASET`
-   - `DATA.ROOT`
-   - `DATA.LABEL_MODE`
-   - `DATA.LABEL_FILE`
-   - optional `DATA.OPTIONS`
-6. Train and evaluate without changing the training loop, sampler, or evaluator
+[Dataset Rule Book](src/softlabel_od/object_detection/DATASET_RULEBOOK.md)
 
 **Soft label generation workflow**
 1. Add dataset-specific preprocessing / loading under `src/softlabel_od/softlabel_generation/adapters/datasets/`

@@ -12,68 +12,6 @@ Extend object detection beyond deterministic box-and-class predictions to output
 
 The model learns not just *where* abnormalities appear, but *how uncertain* that localization is and *how probable* different semantic interpretations are.
 
-## Architecture
-
-Follows hexagonal architecture with separation between core training logic, model components, and dataset adapters.
-
-### Core Components
-
-**Model factory** (`core/model/`)
-- Faster R-CNN with configurable backbones (ResNet50, ResNet101, MobileNet)
-- Probabilistic ROI heads for 1D/2D Gaussian box uncertainty
-- Class-specific regression outputs (8 values per class: 4 mean deltas + 4 log-variances)
-
-**Training loops** (`core/training/`)
-- `train_1d.py`: 1D Gaussian soft label training
-- `train_2d.py`: 2D covariance soft label training (experimental)
-- `train_hard.py`: Hard label baseline training
-- `train_epoch.py`: Shared epoch logic with validation and metric logging
-
-**Evaluation** (`core/evaluation/`)
-- Standard detection: mAP, mAP@50, mAP@75, IoU
-- Soft classification: top-k accuracy, JS divergence, KL divergence, cosine similarity
-- Uncertainty quality: expected IoU, calibration metrics
-
-### Ports
-
-**Dataset port** (`ports/dataset_port.py`)
-- Loads soft labels from JSON
-- Converts normalized coordinates to pixel space
-- Handles hard/soft label modes
-- Implements deterministic multilabel stratified splitting (fixed `random_state=42`)
-
-### Adapters
-
-**Dataset adapters** (`adapters/datasets/`)
-- `vindrcxr.py` — VinDr-CXR soft/hard label format handlers and methods
-- Add other datasets as new modules in this package
-
-**Model components** (`adapters/model_components/`)
-- Custom probabilistic ROI heads
-- Loss function variants
-- Backbone configurations
-
-**Lightning modules** (`adapters/lightning/`)
-- PyTorch Lightning wrappers (optional, not primary)
-
-### Utilities
-
-**Losses** (`utils/losses.py`)
-- Decoupled mean and variance supervision
-- Soft cross-entropy for class distributions
-- Class-weighted loss variants
-
-**Schedulers** (`utils/schedulers.py`)
-- Multistep learning rate schedules
-- Warmup strategies
-
-**Augmentations** (`utils/augmentations.py`)
-- Class-aware augmentation probabilities
-- Medical imaging appropriate transforms
-
-**Config** (`utils/config.py`)
-- YAML-based configuration via `yacs`
-- Environment variable overrides
 
 ## Model Design
 
@@ -170,7 +108,7 @@ L_cls = -Σ_c q_c log(softmax(logits)_c)
 
 Extends standard cross-entropy to probabilistic targets. Supports class weighting for imbalance.
 
-### Why not joint Gaussian NLL?
+### Why not joint Gaussian NLL/ KL Loss?
 
 Joint KL/NLL losses couple mean error and predicted variance. When mean prediction is poor, the model reduces loss by inflating variance. This manifests as:
 - Predicted std >> ground truth std
@@ -195,90 +133,15 @@ Optional balanced sampler ensures rare classes appear during training. (LVIS-sty
 
 Inverse-square-root and Inverse Frquency weighting computed from per-box dominant disease counts:
 
-$w_c = sqrt(N / (K × n_c))$  
+Inverse Square Root Frequency (less aggressive): $w_c = sqrt(N / (K × n_c))$  
+or
+Inverse Frequency: $w_c = N / (K × n_c)$
 
 
 where N = total boxes, K = num classes, n_c = count for class c.
 
 Milder than full inverse-frequency weighting, avoids over-correction.
 
-## Training Workflow
-
-1. Load configuration from YAML
-2. Resolve dataset type (hard, 1D soft, 2D soft)
-3. Build deterministic train/val split
-4. Construct model with configurable backbone
-5. Load pretrained weights if provided
-6. Register class weights for ROI classification
-7. Freeze specified layers for fine-tuning
-8. Train with SGD and multistep LR schedule
-9. Validate with probabilistic and standard metrics
-10. Save model and training metrics JSON
-
-## Usage
-
-### Training
-
-**1D soft labels:**
-```bash
-python -m softlabel_od.scripts.train --config configs/vindr_cxr_1d_config.yaml
-```
-
-**Hard label baseline:**
-```bash
-python -m softlabel_od.scripts.train --config configs/vindr_cxr_hard_label_config.yaml
-```
-
-**Lightning (optional):**
-```bash
-python -m softlabel_od.scripts.train_lightning --config configs/vindr_cxr_1d_config.yaml
-```
-
-### Evaluation
-
-**Soft label model:**
-```bash
-python -m softlabel_od.scripts.evaluate --weights outputs/saved_models/model.pth --gmm_type 1D
-```
-
-**Hard label model:**
-```bash
-python -m softlabel_od.scripts.evaluate --weights outputs/saved_models/model.pth --gmm_type HARD_LABEL
-```
-
-### Configuration
-
-Edit YAML files in `configs/`. Key parameters:
-
-**Data:**
-- `DATA.ROOT`: Dataset root directory
-- `DATA.SOFT_LABEL_FILE_1D`: Path to soft labels JSON
-- `DATA.HARD_LABEL_FILE`: Path to hard labels JSON
-- `DATA.GMM_TYPE`: `'1D'`, `'2D'`, or `'HARD'`
-- `DATA.TEST_SPLIT_RATIO`: Validation split size (e.g., 0.25)
-
-**Model:**
-- `MODEL.NUM_CLASSES`: Number of pathology classes + background
-- `MODEL.BACKBONE`: `'resnet50'`, `'resnet101'`, `'mobilenet'`
-- `MODEL.PROBABILISTIC`: Enable probabilistic head
-
-**Training:**
-- `TRAIN.BASE_LR`: Base learning rate
-- `TRAIN.BATCH_SIZE`: Batch size
-- `TRAIN.NUM_EPOCHS`: Training epochs
-- `TRAIN.MILESTONES`: LR decay milestones
-- `TRAIN.GAMMA`: LR decay factor
-
-**Paths:**
-- `MISC.SAVE_MODEL_PATH`: Model checkpoint directory
-- `MISC.RESULTS_CSV`: Metrics output directory
-- `MISC.PRETRAINED_WEIGHTS`: Path to pretrained checkpoint for fine-tuning
-
-Override paths via environment variables:
-```bash
-export SOFTLABEL_DATA_ROOT=/path/to/data
-export SOFTLABEL_OUTPUT_DIR=/path/to/outputs
-```
 
 ## Inference and Post-processing
 
@@ -327,11 +190,6 @@ Assess whether confidence scores align with actual correctness.
 
 ## Reproducibility
 
-- Validation split is deterministic (`random_state=42`)
-- No train/val leakage at image level
-- Metrics computed on fixed validation set
-- Score thresholds and NMS settings must be documented
-- Probabilistic metrics should accompany precision/recall and mAP
 
 ## Fine-tuning
 
@@ -342,29 +200,10 @@ MISC:
 ```
 
 Freeze backbone layers if needed (configured in training script).
-
-## Extension Points
-
-**Add new datasets:**
-Implement adapter in `adapters/datasets/`:
-- Parse annotations
-- Map classes
-- Normalize coordinates
-
-**Add new backbones:**
-Extend `core/model/factory.py`:
-- Register backbone
-- Configure FPN if needed
-
-**Add new loss functions:**
-Extend `utils/losses.py`:
-- Define loss computation
-- Register in training loop
-
-**Add new metrics:**
-Extend `core/evaluation/metrics.py`:
-- Compute metric on predictions and targets
-- Add to validation logging
+```yaml
+MISC:
+   FROZEN_LAYER: [backbone]
+```
 
 
 ## Key Design Decisions
@@ -377,13 +216,3 @@ Ensures positivity, provides numerical stability, standard in heteroscedastic un
 
 **Why deterministic validation split?**
 Ensures reproducible evaluation across runs and experiments.
-
-
-## Research Applications
-
-- Uncertainty-aware object detection
-- Learning from ambiguous annotations
-- Reliability-weighted supervision
-- Calibration-aware evaluation
-- Hard vs soft label training comparisons
-- Clustering strategy ablations
