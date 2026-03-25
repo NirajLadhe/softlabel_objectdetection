@@ -335,8 +335,8 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         presence_prob_thresh: float = 0.0,
         normalize: bool = False,
         eps: float = 1e-12,
-        freq_term: str = "inverse", # Choose between "inverse", "inverse_sqrt"
-        max_weight: float = 15.0,
+        freq_term: str = cfg.MODEL.ROI_HEAD_BUFFER_FREQ_TERM, # Choose between "inverse", "inverse_sqrt"
+        max_weight: float = cfg.MODEL.ROI_HEAD_BUFFER_MAX_WEIGHT,
         verbose: bool = True,
     ) -> torch.Tensor:
         counts = Counter()

@@ -15,6 +15,8 @@ MODEL:
   NUM_CLASSES: 15
   BACKBONE: 'resnet50'
   PROBABILISTIC: True
+  ROI_HEAD_BUFFER_FREQ_TERM: 'inverse' # Choose between "inverse", "inverse_sqrt"
+  ROI_HEAD_BUFFER_MAX_WEIGHT: 15.0 # Maximum weight for the buffer
 
 MISC:
   RUN_NAME: 'SoftLabel_1D_30Epoch_iou0_5_Lambda2_1_1_lr0_001'

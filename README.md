@@ -1,141 +1,173 @@
 # Soft Label Object Detection
 
-Uncertainty-aware object detection for multi-annotator medical imaging. Converts expert disagreement into probabilistic training targets and trains detectors to predict spatial uncertainty and class distributions.
+Uncertainty-aware object detection for multi-annotator medical imaging.
+
+This repository has two linked parts:
+
+1. `softlabel_generation`: turns multi-rater annotations into probabilistic (soft) labels
+2. `object_detection`: trains detectors on those (soft) labels
+
+The main use case is chest X-ray pathology detection on VinDr-CXR, but the code is structured so new datasets, clustering methods, and model components can be added with limited changes.
 
 ## Overview
 
-Medical imaging annotations exhibit legitimate expert disagreement due to ambiguous boundaries, overlapping disease categories, and varying clinical thresholds. This repository treats disagreement as structured uncertainty rather than noise to be removed.
+Many medical images have valid disagreement (both, regional and semantic) between experts. This repository proposes a Deep-Learning framework to embrace these disagreements instead of collapsing it into one aggregated hard target.
 
-**Pipeline:**
-1. **Soft label generation**: Aggregate multi-rater annotations into Gaussian spatial uncertainty and class probability distributions
-2. **Probabilistic detection**: Train Faster R-CNN models to predict uncertainty-aware localizations and soft class labels
+The pipeline has two stages:
 
-**Primary dataset:** VinDr-CXR (chest X-ray abnormality detection)
+1. **Soft label generation**
+   - groups annotations into finding clusters
+   - weights annotators by agreement
+   - estimates spatial uncertainty and class probabilities
+   - exports canonical hard or soft label files
 
-## Installation
+2. **Probabilistic object detection**
+   - trains Faster R-CNN on those label files
+   - predicts boxes, class distributions, and uncertainty parameters
+   - supports hard labels, 1D soft labels, and 2D soft labels
+
+<details>
+<summary><strong>Core ideas</strong></summary>
+
+- **Soft labels**: each finding can carry a class distribution instead of one class
+- **Spatial uncertainty**: each finding can carry uncertainty over box parameters
+- **Reliability weighting**: annotators can contribute with different weights
+- **Dataset modularity**: datasets are selected from config and built through a registry
+- **Image-level splitting**: train/validation splitting is deterministic and leakage-safe
+
+</details>
+
+<details>
+<summary><strong>Main outputs</strong></summary>
+
+**From `softlabel_generation`:**
+- reliability CSVs
+- Bayesian class priors
+- canonical hard label JSON
+- canonical soft label JSON
+
+**From `object_detection`:**
+- trained detection checkpoints
+- training logs
+- evaluation reports
+
+</details>
+
+## Installation Guide
 
 ### Requirements
 
-- Python ≥3.10
-- PyTorch ≥2.0
-- CUDA (recommended for training)
+- Python `>= 3.10`
+- PyTorch `>= 2.0`
+- CUDA is recommended for training
 
 ### Install
 
 ```bash
+(setting up a virtual environment highly recommended)
 git clone <repository-url>
 cd softlabel_object_detection
-pip install -e . (virtual environment highly recommended)
+pip install -e .
 ```
 
-### Dependencies
+### Quick Start
 
-Automatically installed via `pyproject.toml`
+#### 1. Prepare your data
 
-## Quick Start
+Put your dataset files in a local path and set the paths in a YAML config.
 
-### 1. Prepare data
+For VinDr-CXR, the default workflow expects:
+- images under `data/vinbigdata/train`
+- annotation CSVs and generated outputs under `outputs/vindrcxr`
 
-Place VinDr-CXR annotations at `./data/vinbigdata/train_enriched.csv` or specify path via config.
-
-### 2. Generate soft labels
+#### 2. Generate soft labels
 
 ```bash
 python -m softlabel_od.scripts.run_pipeline
 ```
 
-Outputs: `./outputs/1DGMM_softLabels_iou0_5_with_priors.json`
-
-### 3. Train Probabilistic Object Detection Model
+#### 3. Train a detector
 
 ```bash
-python -m softlabel_od.scripts.train --config <path/to/config>
+python -m softlabel_od.scripts.train --config configs/<YOUR-CONFIG>.yaml
 ```
 
-### 4. Evaluate
+#### 4. Evaluate a model
 
 ```bash
-python -m softlabel_od.scripts.evaluate --weights <path/to/saved_model> --gmm_type <1D/Hard>
+python -m softlabel_od.scripts.evaluate --weights outputs/saved_models/model.pth --gmm_type 1D
 ```
-
-## Architecture
-<details>
-<summary> Package Structure </summary>
-
-```
-src/softlabel_od/
-├── softlabel_generation/          # Soft label generation from multi-rater annotations
-│   ├── core/
-│   │   ├── reliability/           # K-alpha, I/O helpers
-│   │   ├── label_assembly/        # Priors, 1D/2D assembly
-│   │   └── preprocessing/         # CSV normalize, CSV→COCO JSON, enrich, extract annotators
-│   ├── ports/                     # Correspondence solver
-│   ├── adapters/datasets/       # Dataset adapter hooks (VinDr-CXR-oriented)
-│   └── utils/                     # Clustering, anchor analysis
-│
-├── object_detection/              # Probabilistic object detection training
-│   ├── core/                      # Model, training loops, evaluation
-│   ├── ports/                     # Dataset port
-│   ├── adapters/                  # Datasets, model heads, Lightning, evaluators
-│   └── utils/                     # Losses, schedulers, config, augmentations
-│
-├── shared/                        # Shared utilities across packages
-│   └── utils/                     # e.g. serialization
-│
-└── scripts/                       # CLI entry points (orchestration)
-    ├── run_pipeline.py            # End-to-end soft label generation
-    ├── gmm_1d.py, gmm_2d.py       # Soft label generation steps
-    ├── calculate_priors_*.py      # Prior estimation
-    ├── calculate_pairwise_reliability.py
-    ├── train.py, train_lightning.py, evaluate.py
-```
-</details>  
 
 <details>
-<summary> Design Patterns </summary>
+<summary><strong>Quick start notes</strong></summary>
 
-**Adapter pattern**: Dataset extensions (VinDr-CXR implemented; add more under `adapters/datasets/`)
+- Use `--gmm_type HARD_LABEL` to evaluate a deterministic model trained on Hard-Labels
+- Use `python -m softlabel_od.scripts.train_lightning --config ...` for the Pytorch Lightning path
+- Config files are user-specific by design. Each contributor can keep local dataset paths in their own YAML files
 
-**Composition pattern**: Losses and model heads
-
-**Strategy pattern**: Label assembly methods (1D Gaussian, 2D covariance, hard labels)
-
-**Ports and adapters**: Core logic isolated from dataset-specific and model-specific implementations
 </details>
 
+## Sub-Package Information
 
-## Soft Label Generation
+### `softlabel_generation`
 
-Converts multi-rater annotations into probabilistic labels via five stages:
+Builds probabilistic labels from multi-annotator annotations.
+
+**What it does**
+- normalizes raw annotations
+- converts them into a common intermediate format
+- computes annotator agreement
+- clusters overlapping findings
+- produces hard or soft label files
 
 <details>
-<summary>Pipeline stages</summary>
+<summary><strong>Structure</strong></summary>
 
-1. **Normalize annotations**: Convert to normalized coordinates
-2. **Convert to COCO JSON**: Unified format for processing, important to extract rater-list
-3. **Compute reliability**: Pairwise Krippendorff's Alpha per annotator
-4. **Estimate priors**: Class-specific uncertainty priors from multi-annotated examples
-5. **Generate soft labels**: Weighted Gaussian spatial uncertainty + class distributions
+- `core/preprocessing/`
+  - CSV normalization
+  - CSV to JSON conversion
+  - optional data prep helpers
+
+- `core/reliability/`
+  - pairwise agreement
+  - annotator weighting
+
+- `core/label_assembly/`
+  - priors
+  - hard label construction
+  - 1D and 2D soft label construction
+
+- `ports/`
+  - correspondence and clustering interfaces
+
+- `adapters/datasets/`
+  - dataset-specific annotation loaders
+
+- `utils/`
+  - clustering helpers
+  - overlap metrics
+  - analysis tools
+
 </details>
 
 <details>
-<summary>Key features</summary>
+<summary><strong>Important concepts</strong></summary>
 
-**Reliability weighting**: Annotators weighted by pairwise inter-annotator agreement (Krippendorff's Alpha)
+- **Placeholder background box**: background-only findings use a normalized full-image placeholder such as `[0, 0, 1, 1]`
+- **Clustering methods**: IoU, IoMin, IoMin with center-distance gating
+- **Priors**: class-specific uncertainty (bayesian) priors stabilize sparse cases
+- **1D vs 2D**:
+  - `1D`: diagonal uncertainty over box parameters
+  - `2D`: covariance over box vertices
 
-**Unified absence/presence**: `"No Finding"` receives placeholder box `[0, 0, 1, 1]` for uniform reliability computation
-
-**Constraint-aware clustering**: Enforces one annotation per rater per finding cluster
-
-**Bayesian stabilization**: Class-specific priors regularize uncertainty for sparse annotations (VinDr-CXR has ≤3 annotators per image)
-
-**Clustering strategies**: IoU, IoMin, IoMin with center-distance gating
 </details>
 
 <details>
-<summary>Output format</summary>
+<summary><strong>Output Label format (JSON)</strong></summary>
 
-Each soft label contains:
+<details>
+<summary>1D Soft label</summary>
+
 ```json
 {
   "image_id": "...",
@@ -152,180 +184,302 @@ Each soft label contains:
   "num_annotations_in_cluster": 2
 }
 ```
+</details>
 
+<details>
+<summary>Hard label (No-Finding Instance)</summary>
+
+```json
+{
+    'image_id': "...",
+    'image_width': 1024,
+    'image_height': 1024,
+    'finding_id': 1,
+    'original_annotations':[...],
+    'bbox': [0.0, 0.0, 1.0, 1.0],
+    'class': 'No Finding',
+    'confidence': 1.0,
+    'extraction_method': 'true_no_finding',
+    'original_class_probs': {...},
+    'renormalized_class_probs': {'No finding': 1.0},
+    'num_annotations': 3
+}
+```
+</details>
+
+<details>
+<summary>Hard label (Pathology Instance)</summary>
+
+```json
+{
+    'image_id': "...",
+    'image_width': 1024,
+    'image_height': 1024,
+    'finding_id': 0,
+    'original_annotations': [...],
+    'bbox': [x_mean, y_mean, w_mean, h_mean],
+    'class': Aortic Enlargement,
+    'confidence': 0.668,
+    'extraction_method': 'majority_pathology',
+    'original_class_probs': { "Aortic Enlargement": 0.668, "NoFindingInCluster": 0.332 },
+    'renormalized_class_probs': {"Aortic Enlargement": 0.668},
+    'num_annotations': 3
+}
+```
+</details>
 Coordinates normalized to [0, 1].
-</details>
+</details>  
+
+
+### `object_detection`
+
+Trains and evaluates detectors on canonical hard or soft labels.
+
+**What it does**
+- loads canonical label files
+- builds deterministic train/validation splits
+- trains Faster R-CNN variants
+- supports probabilistic heads and standard hard-label baselines
+- evaluates both standard and soft-label metrics
 
 <details>
-<summary>Configuration</summary>
+<summary><strong>Structure</strong></summary>
 
-**IoMin clustering:**
-```bash
-python -m softlabel_od.scripts.run_pipeline \
-  --clustering-method iomin \
-  --iomin-threshold 0.5
-```
+- `core/model/`
+  - model factory
+  - backbone selection
+  - detector construction
 
-**Center-distance gating:**
-```bash
-python -m softlabel_od.scripts.run_pipeline \
-  --clustering-method iomin_center_gate \
-  --iomin-threshold 0.5 \
-  --center-ratio-threshold 0.5
-```
+- `core/training/`
+  - training loops for hard, 1D, and 2D modes
 
-**2D uncertainty (experimental):**
-```bash
-python -m softlabel_od.scripts.run_pipeline --gmm-mode 2d
-```
+- `core/evaluation/`
+  - mAP
+  - IoU
+  - soft-label metrics
+  - uncertainty metrics
 
-**Partial execution:**
-```bash
-python -m softlabel_od.scripts.run_pipeline --steps 4 5  # priors + labels only
-```
+- `core/datasets/`
+  - shared canonical dataset base
+  - shared dataset utilities
 
-See `src/softlabel_od/softlabel_generation/README.md` for detailed documentation.
+- `ports/`
+  - dataset runtime contract
+
+- `adapters/datasets/`
+  - dataset adapters
+  - dataset registry and factory
+
+- `adapters/model_components/`
+  - probabilistic ROI heads
+  - custom model pieces
+
+- `adapters/lightning/`
+  - Lightning wrappers
+
+- `utils/`
+  - losses
+  - schedulers
+  - config loading
+  - augmentations
+  - samplers
+
 </details>
 
-## Object Detection Training
-
-Trains Faster R-CNN models with probabilistic ROI heads to predict spatial uncertainty and class distributions.
 
 <details>
-<summary>Model architecture</summary>
+<summary><strong>Important concepts</strong></summary>
 
-**Base detector**: Faster R-CNN with configurable backbones (ResNet50, ResNet101, MobileNet)
+- **Training modes** : `hard`, `soft_1D`, `soft_2D` (experimental)
 
-**Probabilistic head**: Per-class outputs (8 values per class):
-- 4 mean deltas: `[dx, dy, dw, dh]`
-- 4 log-variances: `[log σ²_dx, log σ²_dy, log σ²_dw, log σ²_dh]`
+- **Standard metrics** : mAP, avg_IoU, class_accuracy
 
-**Uncertainty parameterization**:
-- 1D (primary): Diagonal covariance, per-coordinate independent
-- 2D (experimental): Full covariance matrices at vertices
+- **Soft-label metrics**
+  - top-k accuracy
+  - JS divergence & KL-Divergence- measure for 'Class Probability Distribution' allignment
+
+- **Uncertainty metrics**
+  - expected IoU- measure for regression uncertainty allignment (Standard Deviation and Variances)
+  - calibration-oriented error summaries
+
 </details>
+
+### Main callable scripts
+
+These are the main entry points most users will call.
 
 <details>
-<summary>Loss design</summary>
+<summary><strong>Scripts</strong></summary>
 
-**Decoupled mean and variance supervision** (not joint Gaussian NLL):
+- `softlabel_od.scripts.run_pipeline`
+  - end-to-end soft label generation pipeline
 
-```
-L_mean = SmoothL1(predicted_deltas, target_deltas)
-L_var = SmoothL1(predicted_log_std, target_log_std)
-L_cls = -Σ_c q_c log(softmax(logits)_c)
-```
+- `softlabel_od.scripts.train`
+  - vanilla PyTorch training
 
-Decoupling prevents learned attenuation where variance absorbs mean error. Appropriate when ground truth uncertainty is available from annotation aggregation.
+- `softlabel_od.scripts.train_lightning`
+  - Lightning training path
+
+- `softlabel_od.scripts.evaluate`
+  - model evaluation
+
 </details>
 
-<details>
-<summary>Training modes</summary>
+## Command Line Interface
 
-**1D soft labels:**
-```bash
-python -m softlabel_od.scripts.train --config configs/vindr_cxr_1d_config.yaml
-```
-
-**Hard label baseline:**
-```bash
-python -m softlabel_od.scripts.train --config configs/vindr_cxr_hard_label_config.yaml
-```
-
-**PyTorch Lightning (under development):**
-```bash
-python -m softlabel_od.scripts.train_lightning --config configs/vindr_cxr_1d_config.yaml
-```
-</details>
-
-<details>
-<summary>Evaluation metrics</summary>
-
-**Standard detection**: mAP, mAP@50, mAP@75, IoU
-
-**Soft classification**: top-k accuracy, JS divergence, KL divergence, cosine similarity
-
-**Uncertainty quality**: expected IoU, calibration (correlation between predicted uncertainty and actual error)
-</details>
-
-<details>
-<summary> Configuration Management </summary>
-
-All configurations including `hyperparameter-tuning` for training cycles are handled using YAML files in `./configs` folder.
-Default configurations are defined in `./src/softlabel_od/object_detection/utils/config.py` and overriden using YAML definitions.
-
-**Default locations:**
-- Data: `./data/`
-- Outputs: `./outputs/`
-- Configs: `./configs/`
-
-**Environment variable overrides:**
-- `SOFTLABEL_DATA_ROOT`: Dataset root
-- `SOFTLABEL_OUTPUT_DIR`: Output directory
-
-**Config files:**
-- `vindr_cxr_1d_config.yaml`: 1D soft label training
-- `vindr_cxr_2d_config.yaml`: 2D soft label training (experimental)
-- `vindr_cxr_hard_label_config.yaml`: Deterministic/Hard label baseline
-</details>
-
-## Command-Line Interface
-
-Entry point scripts installed as commands:
+Installed commands:
 
 ```bash
-softlabel-pipeline          # Run soft label generation pipeline
-softlabel-train             # Train object detection model
-softlabel-train-lightning   # Train with PyTorch Lightning
-softlabel-evaluate          # Evaluate trained model
+softlabel-pipeline
+softlabel-train
+softlabel-train-lightning
+softlabel-evaluate
 ```
 
-Or use module invocation:
+Equivalent module calls:
+
 ```bash
 python -m softlabel_od.scripts.run_pipeline
 python -m softlabel_od.scripts.train --config configs/vindr_cxr_1d_config.yaml
+python -m softlabel_od.scripts.train_lightning --config configs/vindr_cxr_1d_config.yaml
+python -m softlabel_od.scripts.evaluate --weights outputs/saved_models/model.pth --gmm_type 1D
 ```
 
+<details>
+<summary><strong>Common pipeline options</strong></summary>
+
+```bash
+python -m softlabel_od.scripts.run_pipeline --gmm-mode 1d
+python -m softlabel_od.scripts.run_pipeline --clustering-method iomin --iomin-threshold 0.5
+python -m softlabel_od.scripts.run_pipeline --clustering-method iomin_center_gate --iomin-threshold 0.5 --center-ratio-threshold 0.5
+python -m softlabel_od.scripts.run_pipeline --steps 4 5
+python -m softlabel_od.scripts.run_pipeline --dry-run
+```
+
+</details>
 
 ## Extension Guide
 
-### Add new dataset
+### Add a new dataset
 
-1. Implement adapter in `softlabel_generation/adapters/datasets/`:
-   - Parse annotations
-   - Map classes
-   - Normalize coordinates
+Dataset extension is now config-driven on the object detection side.
 
-2. Implement adapter in `object_detection/adapters/datasets/`:
-   - Load soft labels
-   - Convert to model format
+**Object detection workflow**
+1. Create a dataset adapter under `src/softlabel_od/object_detection/adapters/datasets/`
+2. Subclass `CanonicalDetectionDataset` when possible
+3. Implement:
+   - `build_class_to_idx()`
+   - `resolve_image_path()`
+4. Register the adapter once in `src/softlabel_od/object_detection/adapters/datasets/__init__.py`
+5. Add a user-specific YAML config with:
+   - `DATA.DATASET`
+   - `DATA.ROOT`
+   - `DATA.LABEL_MODE`
+   - `DATA.LABEL_FILE`
+   - optional `DATA.OPTIONS`
+6. Train and evaluate without changing the training loop, sampler, or evaluator
 
-3. Add config file in `configs/`
+**Soft label generation workflow**
+1. Add dataset-specific preprocessing / loading under `src/softlabel_od/softlabel_generation/adapters/datasets/`
+2. Map raw annotations into the expected intermediate format
+3. Keep coordinates and class names consistent with the downstream label schema
 
-### Add new clustering strategy
+<details>
+<summary><strong>Object detection dataset config example</strong></summary>
 
-Extend `softlabel_generation/ports/correspondence.py`:
-- Define overlap metric
-- Implement hierarchical grouping
-- Enforce participant constraint
+```yaml
+DATA:
+  DATASET: "vindrcxr"
+  ROOT: "/path/to/images"
+  LABEL_MODE: "soft_1d"
+  LABEL_FILE: "/path/to/labels.json"
 
-### Add new loss function
+  OPTIONS:
+    image_subdir: "train"
+    image_extension: ".png"
+    rater_weights_csv: "/path/to/rater_weights.csv"
+```
 
-Extend `object_detection/utils/losses.py`:
-- Define loss computation
-- Register in training loop
+</details>
 
-### Add new evaluation metric
+<details>
+<summary><strong>Object detection dataset rules</strong></summary>
 
-Extend `object_detection/core/evaluation/metrics.py`:
-- Compute metric on predictions and targets
-- Add to validation logging
+A dataset adapter must satisfy the runtime contract in:
 
+- `src/softlabel_od/object_detection/ports/dataset_port.py`
 
+The detailed dataset rules are in:
+
+- `src/softlabel_od/object_detection/DATASET_RULEBOOK.md`
+
+Key points:
+- splits happen at the image level
+- `__getitem__` must return the standard target fields
+- canonical label modes are `hard`, `soft_1d`, `soft_2d`
+- placeholder full-image boxes are treated as background-only findings
+- new adapters should not require changes to training or evaluation code
+
+</details>
+
+### Add a new clustering method
+
+Extend:
+
+- `src/softlabel_od/softlabel_generation/ports/correspondence.py`
+
+Typical work:
+- define the overlap rule
+- implement the grouping logic
+- keep the one-rater-per-cluster constraint if required
+
+### Add a new loss function
+
+Extend:
+
+- `src/softlabel_od/object_detection/utils/losses.py`
+
+Typical work:
+- add the loss
+- wire it into the training path that uses it
+- document how it applies to hard or soft training modes
+
+### Add a new evaluation metric
+
+Extend:
+
+- `src/softlabel_od/object_detection/core/evaluation/metrics.py`
+
+Typical work:
+- compute the metric from predictions and targets
+- add it to the reporting path
+- keep it consistent across train/validation use if needed
+
+## Repository Structure
+
+<details>
+<summary><strong>Tree</strong></summary>
+
+```text
+src/softlabel_od/
+├── softlabel_generation/
+│   ├── core/
+│   ├── ports/
+│   ├── adapters/
+│   └── utils/
+├── object_detection/
+│   ├── core/
+│   ├── ports/
+│   ├── adapters/
+│   └── utils/
+├── shared/
+│   └── utils/
+└── scripts/
+```
+
+</details>
 
 ## Citation
-
-If you use this repository in your research, please cite:
 
 ```bibtex
 Publication Embargo - do not publish
@@ -333,11 +487,9 @@ Publication Embargo - do not publish
 
 ## Acknowledgments
 
-This repository draws from:
-- Faster R-CNN proposal-based detection
-- Heteroscedastic uncertainty modeling
-- Probabilistic object detection
-- Soft-label supervision under annotation ambiguity
-- Multilabel iterative stratification
-- Krippendorff's Alpha for inter-annotator agreement
-- NuCLS-style annotation consolidation
+This repository builds on ideas from:
+- probabilistic object detection
+- Faster R-CNN style detection
+- multi-annotator learning
+- Krippendorff's Alpha
+- multilabel iterative stratification
