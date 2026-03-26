@@ -222,6 +222,7 @@ class ProbabilisticRoIHeads(RoIHeads):
 
             LAMBDA_CLS = 1.0
             # loss_classifier = soft_cross_entropy_loss(pos_class_logits, gt_class_probs, class_weights=self.class_weights)
+            # Weighted-Annotator Cross Entropy Loss: single annotator cluster get smaller gradient than multi-annotator cluster
             per_sample_ce = soft_cross_entropy_loss(
                 pos_class_logits, gt_class_probs,
                 class_weights=self.class_weights,
@@ -400,10 +401,10 @@ class ProbabilisticFasterRCNN(FasterRCNN):
         # Get the number of input features for the RoI head
         in_channels = self.roi_heads.box_predictor.cls_score.in_features
         
-        # Create an instance of our custom probabilistic head
+        # Create an instance of the custom probabilistic head
         probabilistic_predictor = ProbabilisticFastRCNNPredictor(in_channels, num_classes)
         
-        # Create an instance of our custom RoI Heads, passing in the new predictor
+        # Create an instance of the custom probabilistic RoI Heads, passing in the new predictor
         probabilistic_roi_heads = ProbabilisticRoIHeads(
             box_roi_pool=self.roi_heads.box_roi_pool,
             box_head=self.roi_heads.box_head,
@@ -418,13 +419,13 @@ class ProbabilisticFasterRCNN(FasterRCNN):
             detections_per_img=self.roi_heads.detections_per_img
         )
         
-        # Replace the standard RoI heads with our custom one
+        # Replace the standard RoI heads with the custom probabilistic RoI heads
         self.roi_heads = probabilistic_roi_heads
 
 class HardLabelRoIHeads(RoIHeads):
     def forward(self, features, proposals, image_shapes, targets=None):
         """
-        Custom RoIHeads for Hard Labels that uses Focal Loss.
+        Custom RoIHeads for Hard Labels that uses Cross Entropy Loss.
         """
         if self.training:
             proposals, matched_idxs, labels, regression_targets = self.select_training_samples(proposals, targets)
@@ -441,16 +442,12 @@ class HardLabelRoIHeads(RoIHeads):
             regression_targets = torch.cat(regression_targets, dim=0)
             
             # Build one-hot targets for soft_focal_loss
-            gt_class_probs = torch.nn.functional.one_hot(labels.clamp_min(0), num_classes=class_logits.shape[1]).float()
+            # gt_class_probs = torch.nn.functional.one_hot(labels.clamp_min(0), num_classes=class_logits.shape[1]).float()
             
-            # Classification Loss (Focal Loss) - Gamma=2.0 for hard mining
-            # loss_classifier = soft_focal_loss(class_logits, gt_class_probs, alpha=0.25, gamma=2.0)
             LAMBDA_CLS = 10.0
             loss_classifier = torch.nn.functional.cross_entropy(class_logits, labels) * LAMBDA_CLS
             
-            # Regression Loss (Standard Smooth L1)
-            # We must manually compute this to ensure we match the specific class regressor
-            # Logic adapted from standard RoIHeads
+            # Regression Loss (Smooth L1 Loss)
             sampled_pos_inds_subset = torch.where(labels > 0)[0]
             labels_pos = labels[sampled_pos_inds_subset]
             N = class_logits.shape[0]
@@ -481,7 +478,6 @@ class HardLabelRoIHeads(RoIHeads):
                         "scores": scores[i],
                     }
                 )
-
         return result, losses
 
         
@@ -493,7 +489,7 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
             trainable_layers=3
         )
         # FPN always outputs 256 channels regardless of backbone depth
-        # out_channels is set automatically, no need to set manually
+        # out_channels is set automatically
 
     elif backbone_name == 'mobilenet':
         backbone = torchvision.models.mobilenet_v3_large(pretrained=pretrained).features
@@ -502,8 +498,8 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
     else:
         raise ValueError(f"Backbone '{backbone_name}' is not supported.")
     
-    # anchor_sizes = ((32, 64, 96, 192, 384),)
-    # aspect_ratios = ((0.5,  0.75, 1.0, 2.0, 3.0),)*len(anchor_sizes)
+    # Anchor generator: Anchor siezes and aspect ratios derived from anchor analysis on training set
+    # Review: add anchor generator to config file
     anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
     aspect_ratios = ((0.33, 0.5, 0.75, 1.0, 2.0, 3.0),) * 5
     anchor_generator = AnchorGenerator(sizes=anchor_sizes, aspect_ratios=aspect_ratios)
@@ -512,15 +508,14 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
     model = FasterRCNN(
         backbone, 
         num_classes=num_classes, 
-        rpn_anchor_generator=anchor_generator, 
-        # weights=weights,
+        rpn_anchor_generator=anchor_generator,
         rpn_fg_iou_thresh=0.5,  # Lowered from 0.7
         rpn_bg_iou_thresh=0.3,
         rpn_batch_size_per_image=256,
         rpn_pre_nms_top_n_train=2000, # Keep more proposals
         rpn_post_nms_top_n_train=2000,
         box_detections_per_img=100,
-        min_size=800, # Explicitly set resize
+        min_size=800, 
         max_size=1333
     )
 
@@ -528,8 +523,7 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     
     if probabilistic:
-        print("Using Probabilistic GMM Head for the model.")
-        # Replace the pre-trained head with our new probabilistic one
+        print("Using Probabilistic RoI Head for the model.")
         model.roi_heads.box_predictor = ProbabilisticFastRCNNPredictor(in_features, num_classes)
 
         model.roi_heads = ProbabilisticRoIHeads(
@@ -539,7 +533,7 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
             fg_iou_thresh=0.5, bg_iou_thresh=0.5,
             batch_size_per_image=512, positive_fraction=0.25,
             bbox_reg_weights=[10, 10, 5, 5], # [dx, dy, dw, dh] scaled at inference time
-            score_thresh=0.6, nms_thresh=0.4, detections_per_img=200    # nms_thresh=0.3-0.5
+            score_thresh=0.6, nms_thresh=0.4, detections_per_img=200    # keep nms_thresh=0.3-0.5
         )
 
     else:
@@ -556,5 +550,4 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
             bbox_reg_weights=None,
             score_thresh=0.4, nms_thresh=0.5, detections_per_img=100
         )
-
     return model

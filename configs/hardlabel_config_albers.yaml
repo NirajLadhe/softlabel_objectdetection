@@ -1,7 +1,7 @@
 DATA:
   DATASET: 'VinDr-CXR'
   ROOT: '/media/klee_ro/public_datasets/vindr_cxr'
-  SOFT_LABEL_FILE_1D: '../outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json' #'/home/haaroon/SoftLabel_Generation/1DGMM/1DGMM_softLabels_iou0_5_with_priors.json'
+  SOFT_LABEL_FILE_1D: '../outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json'
   SOFT_LABEL_FILE_2D: '../outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json'
   HARD_LABEL_FILE: '../outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json'
   GMM_TYPE: 'HARD_LABEL' 
@@ -14,6 +14,8 @@ MODEL:
   NUM_CLASSES: 15
   BACKBONE: 'resnet50'
   PROBABILISTIC: False  # Standard Faster R-CNN head
+  ROI_HEAD_BUFFER_FREQ_TERM: 'inverse' # Choose between "inverse", "inverse_sqrt"
+  ROI_HEAD_BUFFER_MAX_WEIGHT: 15.0 # Maximum weight for the buffer
 
 MISC:
   RUN_NAME: 'HardLabel_30Epoch_iou0_5_RFS_Sampler_Alpha0_5'
@@ -29,12 +31,13 @@ TRAIN:
   BASE_LR_CLASS: 0.0005
   BASE_LR: 0.001
   BOX_REG_LOSS_WEIGHT: 10.0
+  SCHEDULER: 'main_scheduler'
   MILESTONES: [20, 25]
   GAMMA: 0.5
   BATCH_SIZE: 4
   OVERFIT_BATCHES: 0
   NUM_EPOCHS: 30
-  EARLY_STOPPING: False
+  EARLY_STOPPING: True
 
 AUGMENTATION:
   HORIZONTAL_FLIP_PROB: 0.5
@@ -42,6 +45,6 @@ AUGMENTATION:
   BRIGHTNESS_RANGE: (0.9, 1.1)
   CONTRAST_RANGE: (0.9, 1.1)
   NOISE_STD: 0.02
-  RARE_CLASS_INDICES: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+  RARE_CLASS_INDICES: [2, 3, 5, 6, 7, 9, 13]
   RARE_CLASS_AUGMENT_PROB: 0.7
   COMMON_CLASS_AUGMENT_PROB: 0.2
