@@ -78,9 +78,14 @@ def build_step2_command(args) -> list:
 
 def build_step3_command(args) -> list:
     return [
-        sys.executable, '-m', 'softlabel_od.softlabel_generation.core.reliability.calculate_pairwise_reliability',
-        '--iou', str(args.iou_reliability), '--no_finding_id', str(args.no_finding_id),
-        '--annotation-path', args.coco_json, '--output-dir', args.reliability_output_dir,
+        sys.executable, '-m',
+        'softlabel_od.softlabel_generation.core.reliability.calculate_reliability',
+        '--iou', str(args.iou_reliability),
+        '--no_finding_id', str(args.no_finding_id),
+        '--annotation-path', args.coco_json,
+        '--output-dir', args.reliability_output_dir,
+        '--backend', args.reliability_backend,
+        '--method', args.reliability_method,
     ]
 
 
@@ -144,6 +149,8 @@ def main():
     parser.add_argument('--prior-alpha', type=float, default=1.0)
     parser.add_argument('--min-samples', type=int, default=5)
     parser.add_argument('--max-images', type=int, default=None)
+    parser.add_argument('--reliability-backend', type=str, default='kalos', choices=['kalos', 'legacy'], help='Reliability calculation backend.')
+    parser.add_argument('--reliability-method', type=str, default='shm', choices=['greedy', 'shm', 'ahc'], help='Matching algorithm (kalos backend only).')
     args = parser.parse_args()
 
     iou_rel_str = safe_threshold_str(args.iou_reliability)

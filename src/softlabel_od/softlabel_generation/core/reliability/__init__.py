@@ -3,15 +3,11 @@ Inter-annotator reliability core.
 
 Public API
 ----------
-calculate_iaa_from_annotations  — compute Krippendorff's alpha from COCO JSON
-ReliabilityData                 — multi-annotator matching matrix
+ReliabilityCalculator       — abstract base (subclass to add a new backend)
+KalosReliabilityCalculator  — KαLOS Vision-Alpha backend (recommended)
 """
 
-from softlabel_od.softlabel_generation.core.reliability.calculate_iaa import (
-    calculate_iaa_from_annotations,
-)
-from softlabel_od.softlabel_generation.core.reliability.reliability_data import (
-    ReliabilityData,
-    MatrixEntry,
-    EmptyEntry,
-)
+from softlabel_od.softlabel_generation.core.reliability.base import (ReliabilityCalculator)
+from softlabel_od.softlabel_generation.core.reliability.kalos_reliability import (KalosReliabilityCalculator)
+
+__all__ = ["ReliabilityCalculator", "KalosReliabilityCalculator"]
