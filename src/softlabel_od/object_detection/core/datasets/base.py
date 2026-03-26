@@ -21,8 +21,9 @@ from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 
 from softlabel_od.object_detection.ports.dataset_port import DetectionDatasetPort
 from softlabel_od.object_detection.utils.training_helpers import load_rater_weights
+from softlabel_od.object_detection.utils.config import get_cfg_defaults
 
-
+cfg = get_cfg_defaults()
 BACKGROUND_KEYS = {
     "__background__",
     "NoFindingInCluster",
@@ -335,7 +336,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         presence_prob_thresh: float = 0.0,
         normalize: bool = False,
         eps: float = 1e-12,
-        freq_term: str = cfg.MODEL.ROI_HEAD_BUFFER_FREQ_TERM, # Choose between "inverse", "inverse_sqrt"
+        freq_term: str = cfg.MODEL.ROI_HEAD_BUFFER_FREQ_TERM,
         max_weight: float = cfg.MODEL.ROI_HEAD_BUFFER_MAX_WEIGHT,
         verbose: bool = True,
     ) -> torch.Tensor:
@@ -432,7 +433,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         splitter = MultilabelStratifiedShuffleSplit(
             n_splits=1,
             test_size=self.test_split_ratio,
-            random_state=42,
+            random_state=42, # DO NOT CHANGE THIS VALUE TO MAINTAIN REPRODUCIBILITY
         )
         x_dummy = np.zeros((n_images, 1), dtype=np.int32)
         train_idx, val_idx = next(splitter.split(x_dummy, y))

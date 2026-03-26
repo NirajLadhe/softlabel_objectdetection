@@ -32,7 +32,8 @@ def get_cfg_defaults():
     _C.MODEL.NUM_CLASSES = 15  # 14 pathology classes + 1 background/no finding
     _C.MODEL.BACKBONE = 'resnet50'
     _C.MODEL.PROBABILISTIC = True
-
+    _C.MODEL.ROI_HEAD_BUFFER_FREQ_TERM = 'inverse' # Choose between "inverse", "inverse_sqrt"
+    _C.MODEL.ROI_HEAD_BUFFER_MAX_WEIGHT = 15.0 # Maximum weight for the buffer
     # Training settings
     _C.TRAIN = CN()
     _C.TRAIN.BASE_LR_BBOX = 0.005

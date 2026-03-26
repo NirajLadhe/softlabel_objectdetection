@@ -21,6 +21,8 @@ from softlabel_od.object_detection.utils.training_helpers import (
 )
 from tqdm import tqdm
 from softlabel_od.object_detection.core.evaluation.metrics import match_predictions_to_gt
+from softlabel_od.object_detection.utils.config import get_cfg_defaults
+cfg = get_cfg_defaults()
 
 @torch.no_grad()
 def validate_hard_labels(model, data_loader, device, comprehensive=False, epoch=0, num_epochs=1):
