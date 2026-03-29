@@ -186,7 +186,7 @@ def create_balanced_sampler(
     )
     return WeightedRandomSampler(
         weights=weights, 
-        num_samples=int(len(weights)*1.5), # Increase the number of samples to 1.5x the number of images (rare classes see 50% more samples)
+        num_samples=int(len(weights)*1.0), # Increase the number of samples to 1.5x the number of images (rare classes see 50% more samples)
         replacement=True,
     )
 

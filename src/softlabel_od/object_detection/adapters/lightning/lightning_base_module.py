@@ -14,13 +14,13 @@ Subclasses implement training_step / validation_step / on_validation_epoch_end.
 
 import torch
 import pytorch_lightning as pl
-
-from softlabel_od.object_detection.training_setup import (
-    build_model,
-    configure_model_for_training,
-    build_optimizer,
-    build_scheduler,
+from torch.optim.lr_scheduler import LambdaLR, MultiStepLR, CosineAnnealingLR
+from softlabel_od.object_detection.core.model.factory import get_model
+from softlabel_od.object_detection.utils.training_helpers import (
+    load_pretrained_weights,
+    freeze_layers,
 )
+from softlabel_od.object_detection.utils.config import resolve_label_mode
 
 
 class BaseDetectionLightningModule(pl.LightningModule):
@@ -34,36 +34,53 @@ class BaseDetectionLightningModule(pl.LightningModule):
         super().__init__()
         self.cfg = cfg
         self.model_type = model_type
-
-        # Build model WITHOUT moving to device; Lightning handles device placement.
-        self.model = build_model(cfg, model_type, device=None)
-
-        # configure_model_for_training needs the train dataset for class weights.
-        # We defer that to on_fit_start() when the datamodule is already set up.
         self._model_configured = False
-
-        # Warmup state (epoch-0 only, step-based, matching train_epoch.py)
-        self._base_lrs = None
-        self._warmup_factor = 1.0 / 1000.0
+        self._warmup_iters = None
+        self.model = get_model(
+            num_classes=cfg.MODEL.NUM_CLASSES,
+            model_type=model_type,
+            backbone_name=cfg.MODEL.BACKBONE,
+            pretrained=True,
+            probabilistic=cfg.MODEL.PROBABILISTIC,
+        )
 
     # ------------------------------------------------------------------
     # Model configuration — called once after fit() starts
     # ------------------------------------------------------------------
 
     def on_fit_start(self):
-        """
-        Configure model after Lightning has placed it on the target device.
-        Requires the datamodule to already have called setup() so that
-        self.trainer.datamodule.train_dataset is available.
-        """
         if self._model_configured:
             return
-
-        train_dataset = self._get_train_dataset()
+        dm = self.trainer.datamodule
+        if dm is None or dm.train_dataset is None:
+            raise RuntimeError("DataModule.train_dataset must exist before on_fit_start().")
+        train_dataset = dm.train_dataset
         device = self.device
+        if self.cfg.MISC.PRETRAINED_WEIGHTS:
+            self.model = load_pretrained_weights(
+                self.model,
+                self.cfg.MISC.PRETRAINED_WEIGHTS,
+                device,
+            )
+            print(f"Loaded pretrained weights from: {self.cfg.MISC.PRETRAINED_WEIGHTS}")
+        class_weights = train_dataset.compute_roi_head_class_weights_per_cluster(
+            num_classes=self.cfg.MODEL.NUM_CLASSES,
+            presence_prob_thresh=0.0,
+            normalize=False,
+            verbose=True,
+        )
 
-        # This applies pretrained loading, class_weights buffer, frozen layers.
-        configure_model_for_training(self.cfg, self.model, train_dataset, device)
+        if "class_weights" in self.model.roi_heads._buffers:
+            self.model.roi_heads._buffers["class_weights"] = class_weights.to(device)
+        else:
+            self.model.roi_heads.register_buffer("class_weights", class_weights.to(device))
+        print("Registered class_weights buffer on roi_heads.")
+
+        if self.cfg.MISC.FROZEN_LAYERS:
+            freeze_layers(self.model, self.cfg.MISC.FROZEN_LAYERS)
+            print(f"Frozen layers: {self.cfg.MISC.FROZEN_LAYERS}")
+
+        self._warmup_iters = 1000 #min(1000, max(int(self.trainer.num_training_batches) - 1, 1))
         self._model_configured = True
 
     def _get_train_dataset(self):
@@ -106,50 +123,70 @@ class BaseDetectionLightningModule(pl.LightningModule):
     # ------------------------------------------------------------------
 
     def configure_optimizers(self):
-        optimizer = build_optimizer(self.cfg, self.model)
-        scheduler = build_scheduler(self.cfg, optimizer)
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1,
-            },
-        }
+        bbox_params, class_params, other_params = [], [], []
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if "box_predictor.bbox_pred" in name or "box_predictor.bbox_pred_gmm" in name:
+                bbox_params.append(param)
+            elif "box_predictor.cls_score" in name:
+                class_params.append(param)
+            else:
+                other_params.append(param)
+        optimizer = torch.optim.SGD(
+            [
+                {"params": bbox_params, "lr": self.cfg.TRAIN.BASE_LR_BBOX},
+                {"params": class_params, "lr": self.cfg.TRAIN.BASE_LR_CLASS},
+                {"params": other_params, "lr": self.cfg.TRAIN.BASE_LR},
+            ],
+            momentum=0.9,
+            weight_decay=0.001,
+        )
 
-    # ------------------------------------------------------------------
-    # Epoch-0 warmup — matches train_epoch.py behaviour exactly
-    #
-    # train_epoch.py:
-    #   warmup_factor = 1/1000
-    #   warmup_iters  = min(1000, len(data_loader) - 1)
-    #   step-wise; resets after epoch 0
-    # ------------------------------------------------------------------
-
-    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure=None, **kwargs):
-        if self._base_lrs is None:
-            self._base_lrs = [pg["lr"] for pg in optimizer.param_groups]
-
-        if self.current_epoch == 0 and self.trainer is not None:
-            warmup_iters = min(
-                1000, max(int(self.trainer.num_training_batches) - 1, 1)
-            )
-            x = min(self.global_step, warmup_iters)
-            alpha = float(x) / float(max(warmup_iters, 1))
-            scale = self._warmup_factor * (1.0 - alpha) + alpha
-            for pg, base_lr in zip(optimizer.param_groups, self._base_lrs):
-                pg["lr"] = base_lr * scale
-
-        optimizer.step(closure=optimizer_closure)
-        optimizer.zero_grad()
-
-    # ------------------------------------------------------------------
-    # Gradient clipping — matches train_epoch.py max_norm=5.0
-    #
-    # Trainer must be created with gradient_clip_val=None so Lightning
-    # does not clip independently; we apply clipping here manually just
-    # before the step so the order matches legacy exactly.
-    # ------------------------------------------------------------------
-
-    def on_before_optimizer_step(self, optimizer):
-        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=5.0)
+        def warmup_lambda(step: int):
+            warmup_iters = self._warmup_iters if self._warmup_iters is not None else 1
+            if step >= warmup_iters:
+                return 1.0
+            alpha = float(step) / float(max(warmup_iters, 1))
+            return (1.0 / 1000.0) * (1.0 - alpha) + alpha
+        warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
+        main_scheduler = MultiStepLR(
+            optimizer,
+            milestones=list(self.cfg.TRAIN.MILESTONES),
+            gamma=self.cfg.TRAIN.GAMMA,
+        )
+        cosine_scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=self.cfg.TRAIN.NUM_EPOCHS,
+            eta_min=1e-5,
+        )
+        if self.cfg.TRAIN.SCHEDULER == "main_scheduler":
+            epoch_scheduler = main_scheduler
+        elif self.cfg.TRAIN.SCHEDULER == "secondary_scheduler":
+            epoch_scheduler = cosine_scheduler
+        else:
+            raise ValueError(f"Unsupported scheduler: {self.cfg.TRAIN.SCHEDULER}")
+        # return {
+        #     "optimizer": optimizer,
+        #     "lr_scheduler": [
+        #         {
+        #             "scheduler": warmup_scheduler,
+        #             "interval": "step",
+        #             "frequency": 1,
+        #             "name": "warmup",
+        #         },
+        #         {
+        #             "scheduler": epoch_scheduler,
+        #             "interval": "epoch",
+        #             "frequency": 1,
+        #             "name": "epoch_lr",
+        #         },
+        #     ],
+        # }
+        return (
+            [optimizer],
+            [
+                {"scheduler": warmup_scheduler, "interval": "step", "frequency": 1, "name": "warmup"},
+                {"scheduler": epoch_scheduler, "interval": "epoch", "frequency": 1, "name": "epoch_lr"},
+            ],
+        )

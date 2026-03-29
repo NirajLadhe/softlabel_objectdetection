@@ -24,7 +24,6 @@ _SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT  = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
 DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "1d_softlabel_config_albers.yaml")
 
-
 def _get_module_class(label_mode: str):
     if label_mode == "soft_1d":
         from softlabel_od.object_detection.adapters.lightning.lightning_1d_module import (
@@ -93,17 +92,8 @@ def main():
     os.makedirs(cfg.MISC.RESULTS_CSV, exist_ok=True)
 
     callbacks = [
-        ModelCheckpoint(
-            dirpath=ckpt_dir,
-            filename="epoch{epoch:03d}-valloss{val/loss:.4f}",
-            monitor="val/loss",
-            mode="min",
-            save_top_k=1,
-            save_last=True,
-        ),
-        LearningRateMonitor(logging_interval="step"),
         _get_history_logger(label_mode, cfg),
-        ExportBestPthCallback(cfg),    # exports .pth + runConfig.yaml
+        ExportBestPthCallback(cfg),
     ]
 
     if cfg.TRAIN.EARLY_STOPPING:
@@ -120,23 +110,23 @@ def main():
 
     # -- Trainer ---------------------------------------------------------
     trainer = pl.Trainer(
-        accelerator="auto",
-        devices="auto",
+        accelerator=cfg.LIGHTNING.ACCELERATOR,
+        devices=cfg.LIGHTNING.DEVICES,
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
+        accumulate_grad_batches=cfg.LIGHTNING.ACCUMULATE_GRAD_BATCHES,
         logger=tb_logger,
         callbacks=callbacks,
-        log_every_n_steps=10,
-        enable_checkpointing=True,
-        deterministic=False,
-        precision=32,
-        # Gradient clipping is handled inside BaseDetectionLightningModule
-        # via on_before_optimizer_step to preserve the exact point in the
-        # step where legacy train_epoch.py applies clip_grad_norm_.
-        gradient_clip_val=None,
+        # log_every_n_steps=cfg.LIGHTNING.LOG_EVERY_N_STEPS,
+        enable_checkpointing=cfg.LIGHTNING.ENABLE_CHECKPOINTING,    
+        enable_progress_bar=cfg.LIGHTNING.ENABLE_PROGRESS_BAR,
+        deterministic=cfg.LIGHTNING.DETERMINISTIC,
+        precision=cfg.LIGHTNING.PRECISION,
+        gradient_clip_val=5.0,
+        gradient_clip_algorithm="norm",
         # Overfit is handled at the DataModule level, not here.
-        # Leave overfit_batches=0 so Lightning doesn't override our loader.
+        # Leave overfit_batches=0 so Lightning doesn't override the dataloader.
         overfit_batches=0,
-        num_sanity_val_steps=0,
+        num_sanity_val_steps=cfg.LIGHTNING.NUM_SANITY_VAL_STEPS,
     )
 
     trainer.fit(model, datamodule=dm)
