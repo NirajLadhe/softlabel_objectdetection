@@ -1,16 +1,23 @@
-"""
-PyTorch Lightning adapters (experimental — parallel to vanilla PyTorch path).
+from softlabel_od.object_detection.adapters.lightning.lightning_datamodule import (
+    DetectionLightningDataModule,
+)
+from softlabel_od.object_detection.adapters.lightning.lightning_base_module import (
+    BaseDetectionLightningModule,
+)
+from softlabel_od.object_detection.adapters.lightning.lightning_1d_module import (
+    SoftLabel1DLightningModule,
+)
+from softlabel_od.object_detection.adapters.lightning.lightning_hard_module import (
+    HardLabelLightningModule,
+)
+from softlabel_od.object_detection.adapters.lightning.lightning_2d_module import (
+    SoftLabel2DLightningModule,
+)
 
-These modules mirror the vanilla training logic and will become the primary
-training path once the migration is complete.
-
-1D GMM
-------
-VinDr1DLightningModule   — LightningModule for 1D soft label training
-VinDr1DDataModule        — LightningDataModule for VinDr-CXR 1D
-
-Hard Label
-----------
-VinDrHardLightningModule — LightningModule for hard label training
-VinDrHardDataModule      — LightningDataModule for VinDr-CXR hard labels
-"""
+__all__ = [
+    "DetectionLightningDataModule",
+    "BaseDetectionLightningModule",
+    "SoftLabel1DLightningModule",
+    "HardLabelLightningModule",
+    "SoftLabel2DLightningModule",
+]

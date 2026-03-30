@@ -1,79 +1,134 @@
 """
 CLI entry point: softlabel-train-lightning
 
-PyTorch Lightning training path (experimental — parallel to vanilla PyTorch).
-Dispatches to 1D or hard-label Lightning module based on config GMM_TYPE.
+Parallel alternative to softlabel-train. Uses the Lightning training path
+on top of the same training_setup assembly as the legacy PyTorch path.
 """
 
 import argparse
 import os
+
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from softlabel_od.object_detection.utils.config import get_cfg_from_file
+from softlabel_od.object_detection.utils.config import get_cfg_from_file, resolve_label_mode
+from softlabel_od.object_detection.adapters.lightning.lightning_datamodule import (
+    DetectionLightningDataModule,
+)
+from softlabel_od.object_detection.adapters.lightning.lightning_callbacks import (
+    ExportBestPthCallback,
+)
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
-DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "vindr_cxr_1d_config.yaml")
+_SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT  = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
+DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "1d_softlabel_config_albers.yaml")
+
+def _get_module_class(label_mode: str):
+    if label_mode == "soft_1d":
+        from softlabel_od.object_detection.adapters.lightning.lightning_1d_module import (
+            SoftLabel1DLightningModule,
+        )
+        return SoftLabel1DLightningModule
+    if label_mode == "soft_2d":
+        from softlabel_od.object_detection.adapters.lightning.lightning_2d_module import (
+            SoftLabel2DLightningModule,
+        )
+        return SoftLabel2DLightningModule
+    if label_mode == "hard":
+        from softlabel_od.object_detection.adapters.lightning.lightning_hard_module import (
+            HardLabelLightningModule,
+        )
+        return HardLabelLightningModule
+    raise ValueError(f"Unsupported label mode for Lightning path: {label_mode!r}")
+
+
+def _get_history_logger(label_mode: str, cfg):
+    if label_mode == "soft_1d":
+        from softlabel_od.object_detection.adapters.lightning.lightning_metrics_logger import (
+            Phase1JSONHistoryLogger,
+        )
+        return Phase1JSONHistoryLogger(cfg, print_summary=True)
+    if label_mode == "hard":
+        from softlabel_od.object_detection.adapters.lightning.lightning_metric_logger_hard import (
+            HardJSONHistoryLogger,
+        )
+        return HardJSONHistoryLogger(cfg, print_summary=True)
+    # 2D: fall back to a minimal logger until a dedicated one is added
+    from softlabel_od.object_detection.adapters.lightning.lightning_metric_logger_hard import (
+        HardJSONHistoryLogger,
+    )
+    return HardJSONHistoryLogger(cfg, print_summary=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train VinDr-CXR model (PyTorch Lightning)")
-    parser.add_argument("--config", type=str, default=DEFAULT_CONFIG, help="Path to config YAML")
+    parser = argparse.ArgumentParser(description="Train model (PyTorch Lightning)")
+    parser.add_argument("--config", type=str, default=DEFAULT_CONFIG)
     args = parser.parse_args()
 
     cfg = get_cfg_from_file(args.config)
+    cfg.defrost()
+    cfg.CONFIG_FILE_PATH = args.config
+    cfg.freeze()
 
-    gmm_type = cfg.DATA.GMM_TYPE
-    if gmm_type == "HARD_LABEL":
-        from softlabel_od.object_detection.adapters.lightning.lightning_hard_datamodule import VinDrHardDataModule
-        from softlabel_od.object_detection.adapters.lightning.lightning_hard_module import HardLabelLightningModule
-        from softlabel_od.object_detection.adapters.lightning.lightning_metric_logger_hard import HardJSONHistoryLogger
-        dm_cls, model_cls, logger_cls = VinDrHardDataModule, HardLabelLightningModule, HardJSONHistoryLogger
-    else:
-        from softlabel_od.object_detection.adapters.lightning.lightning_1d_datamodule import VinDr1DDataModule
-        from softlabel_od.object_detection.adapters.lightning.lightning_1d_module import SoftLabel1DLightningModule
-        from softlabel_od.object_detection.adapters.lightning.lightning_metrics_logger import Phase1JSONHistoryLogger
-        dm_cls, model_cls, logger_cls = VinDr1DDataModule, SoftLabel1DLightningModule, Phase1JSONHistoryLogger
+    label_mode  = resolve_label_mode(cfg)
+    module_cls  = _get_module_class(label_mode)
 
     pl.seed_everything(42, workers=True)
-    dm = dm_cls(cfg)
-    model = model_cls(cfg)
 
-    logger = TensorBoardLogger(
-        save_dir=cfg.MISC.RESULTS_CSV, name=cfg.MISC.RUN_NAME, default_hp_metric=False
+    dm     = DetectionLightningDataModule(cfg)
+    model  = module_cls(cfg)
+
+    # -- Loggers ---------------------------------------------------------
+    tb_logger = TensorBoardLogger(
+        save_dir=cfg.MISC.RESULTS_CSV,
+        name=cfg.MISC.RUN_NAME,
+        default_hp_metric=False,
     )
+
+    # -- Callbacks -------------------------------------------------------
     ckpt_dir = os.path.join(cfg.MISC.SAVE_MODEL_PATH, cfg.MISC.RUN_NAME)
     os.makedirs(ckpt_dir, exist_ok=True)
+    os.makedirs(cfg.MISC.RESULTS_CSV, exist_ok=True)
 
     callbacks = [
-        ModelCheckpoint(
-            dirpath=ckpt_dir,
-            filename="epoch{epoch:03d}-valloss{val/loss:.4f}",
-            monitor="val/loss",
-            mode="min",
-            save_top_k=1,
-            save_last=True,
-        ),
-        LearningRateMonitor(logging_interval="step"),
-        logger_cls(cfg, print_summary=True),
+        _get_history_logger(label_mode, cfg),
+        ExportBestPthCallback(cfg),
     ]
-    if cfg.TRAIN.EARLY_STOPPING:
-        callbacks.append(EarlyStopping(monitor="val/loss", mode="min", patience=5, min_delta=0.0))
 
+    if cfg.TRAIN.EARLY_STOPPING:
+        if label_mode == "soft_1d":
+            # Use the composite early stopping matching train_1d.py exactly
+            from softlabel_od.object_detection.adapters.lightning.lightning_callbacks import (
+                CompositeEarlyStopping1D,
+            )
+            callbacks.append(CompositeEarlyStopping1D())
+        else:
+            callbacks.append(
+                EarlyStopping(monitor="val/loss", mode="min", patience=5, min_delta=0.0)
+            )
+
+    # -- Trainer ---------------------------------------------------------
     trainer = pl.Trainer(
-        accelerator="auto",
-        devices="auto",
+        accelerator=cfg.LIGHTNING.ACCELERATOR,
+        devices=cfg.LIGHTNING.DEVICES,
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        logger=logger,
+        accumulate_grad_batches=cfg.LIGHTNING.ACCUMULATE_GRAD_BATCHES,
+        logger=tb_logger,
         callbacks=callbacks,
-        log_every_n_steps=10,
-        enable_checkpointing=True,
-        deterministic=False,
-        precision=32,
-        overfit_batches=cfg.TRAIN.OVERFIT_BATCHES,
+        # log_every_n_steps=cfg.LIGHTNING.LOG_EVERY_N_STEPS,
+        enable_checkpointing=cfg.LIGHTNING.ENABLE_CHECKPOINTING,    
+        enable_progress_bar=cfg.LIGHTNING.ENABLE_PROGRESS_BAR,
+        deterministic=cfg.LIGHTNING.DETERMINISTIC,
+        precision=cfg.LIGHTNING.PRECISION,
+        gradient_clip_val=5.0,
+        gradient_clip_algorithm="norm",
+        # Overfit is handled at the DataModule level, not here.
+        # Leave overfit_batches=0 so Lightning doesn't override the dataloader.
+        overfit_batches=0,
+        num_sanity_val_steps=cfg.LIGHTNING.NUM_SANITY_VAL_STEPS,
     )
+
     trainer.fit(model, datamodule=dm)
 
 

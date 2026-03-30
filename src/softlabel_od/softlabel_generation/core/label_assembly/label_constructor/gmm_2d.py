@@ -26,6 +26,7 @@ from softlabel_od.softlabel_generation.core.preprocessing.data_loader import loa
 from softlabel_od.softlabel_generation.utils.clustering import (
     normalize_annotator_weights, cluster_annotations, VALID_CLUSTERING_METHODS
 )
+from softlabel_od.softlabel_generation.utils.semantic_mapping import get_semantic_map
 from softlabel_od.shared.utils.serialization import NpEncoder
 
 # Constants
@@ -90,6 +91,10 @@ def main():
                         help='IoMin threshold for clustering (used when method=iomin or iomin_center_gate, default: 0.5)')
     parser.add_argument('--center-ratio-threshold', type=float, default=0.5,
                         help='Center-distance gate threshold (used when method=iomin_center_gate, default: 0.5)')
+    
+    # Semantic mapping parameters
+    parser.add_argument('--semantic-map', type=str, default='vindrcxr',
+                        help='Semantic mapping file path (used when method=iomin_center_gate, default: None)')
     
     # Reliability IoU (for path resolution)
     parser.add_argument('--iou-reliability', type=float, default=0.5,
@@ -176,7 +181,8 @@ def main():
             method=CLUSTERING_METHOD,
             iou_threshold=IOU_THRESHOLD,
             iomin_threshold=IOMIN_THRESHOLD,
-            center_ratio_threshold=CENTER_RATIO_THRESHOLD
+            center_ratio_threshold=CENTER_RATIO_THRESHOLD,
+            semantic_map=get_semantic_map(args.semantic_map)
         )
         
         for cluster_idx, cluster_annotations_list in enumerate(annotation_clusters):
