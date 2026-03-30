@@ -42,6 +42,7 @@ class AHCAdapter(CorrespondenceSolver):
         distance_metric: str = "iou",
         threshold: float = 0.5,
         center_ratio_threshold: float = 0.5,
+        semantic_map: str = None,
         **kwargs
     ) -> List[List[Dict[str, Any]]]:
         from softlabel_od.softlabel_generation.utils.clustering import cluster_annotations
@@ -53,4 +54,5 @@ class AHCAdapter(CorrespondenceSolver):
             iou_threshold=threshold,
             iomin_threshold=threshold,
             center_ratio_threshold=center_ratio_threshold,
+            semantic_map=get_semantic_map(semantic_map),
         )

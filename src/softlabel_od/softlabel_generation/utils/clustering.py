@@ -9,8 +9,9 @@ import pandas as pd
 import numpy as np
 import json
 from collections import defaultdict
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, NamedTuple, Optional
 from scipy.cluster.hierarchy import linkage, fcluster
+from softlabel_od.softlabel_generation.utils.semantic_mapping import SemanticMapping
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -361,87 +362,176 @@ def cluster_annotations_by_iomin_center_gate(
 
     return clusters
 
+class EjectedAnnotation(NamedTuple):
+    annotation: Dict
+    source_cluster_majority_class: str
+    ejection_reason: str  # 'same_class_duplicate' | 'different_class_coann'
 
-def enforce_participant_constraint(clusters: List[List[Dict]]) -> List[List[Dict]]:
+
+def enforce_participant_constraint(
+    clusters: List[List[Dict]]
+) -> Tuple[List[List[Dict]], List[EjectedAnnotation]]:
     """
     Post-clustering safety net: ensure each cluster has at most one annotation per rater.
-    
-    If a rater contributed multiple annotations to the same cluster (which can happen
-    when they drew overlapping bboxes with different class labels), this function:
-    1. Determines the cluster's majority class from non-duplicate rater contributions
-    2. Keeps the annotation from the duplicate rater that matches the majority class
-    3. Ejects non-matching annotations to their own singleton clusters
-    
-    This preserves all annotations in the output (nothing is discarded) while ensuring
-    each cluster respects the one-annotation-per-rater invariant.
-    
-    Args:
-        clusters: List of clusters from hierarchical clustering
-    
+
     Returns:
-        List of clusters with the participant constraint enforced
+        Tuple of (enforced_clusters, ejected_metadata).
+        Ejected annotations are NOT added as singletons here — caller decides their fate
+        via resolve_ejected_annotations().
     """
     enforced_clusters = []
-    ejected = []
-    
+    ejected_list: List[EjectedAnnotation] = []
+
     for cluster in clusters:
         if len(cluster) <= 1:
             enforced_clusters.append(cluster)
             continue
-        
-        # Group annotations by rater
+
         rater_annotations = defaultdict(list)
         for ann in cluster:
             rater_annotations[ann.get('rater_id')].append(ann)
-        
-        # If no rater has duplicates, keep cluster as-is
+
         if all(len(anns) <= 1 for anns in rater_annotations.values()):
             enforced_clusters.append(cluster)
             continue
-        
-        # Determine majority class from unique-rater contributions first,
-        # since those are unambiguous signals of what this cluster represents
+
         unique_rater_votes = []
         for rater_id, anns in rater_annotations.items():
             if len(anns) == 1:
                 unique_rater_votes.append(anns[0].get('class_name'))
-        
+
         if unique_rater_votes:
             majority_class = max(set(unique_rater_votes), key=unique_rater_votes.count)
         else:
-            # All raters have duplicates — use overall majority
             all_votes = [ann.get('class_name') for ann in cluster]
             majority_class = max(set(all_votes), key=all_votes.count)
-        
-        # Resolve duplicates: keep the annotation matching majority class
+
         kept = []
         for rater_id, anns in rater_annotations.items():
             if len(anns) == 1:
                 kept.append(anns[0])
             else:
-                # Prefer annotation whose class matches the cluster majority
                 matching = [a for a in anns if a.get('class_name') == majority_class]
                 non_matching = [a for a in anns if a.get('class_name') != majority_class]
-                
+
                 if matching:
                     kept.append(matching[0])
-                    # Eject extra same-class duplicates (true duplicates / corrections)
-                    ejected.extend(matching[1:])
-                    # Eject different-class annotations
-                    ejected.extend(non_matching)
+                    for ann in matching[1:]:
+                        ejected_list.append(EjectedAnnotation(
+                            annotation=ann,
+                            source_cluster_majority_class=majority_class,
+                            ejection_reason='same_class_duplicate'
+                        ))
+                    for ann in non_matching:
+                        ejected_list.append(EjectedAnnotation(
+                            annotation=ann,
+                            source_cluster_majority_class=majority_class,
+                            ejection_reason='different_class_coann'
+                        ))
                 else:
-                    # No annotation matches majority — keep first, eject rest
                     kept.append(anns[0])
-                    ejected.extend(anns[1:])
-        
-        enforced_clusters.append(kept)
-    
-    # Ejected annotations become singleton clusters (not discarded)
-    for ann in ejected:
-        enforced_clusters.append([ann])
-    
-    return enforced_clusters
+                    for ann in anns[1:]:
+                        ejected_list.append(EjectedAnnotation(
+                            annotation=ann,
+                            source_cluster_majority_class=majority_class,
+                            ejection_reason='different_class_coann'
+                        ))
 
+        enforced_clusters.append(kept)
+
+    return enforced_clusters, ejected_list
+
+def resolve_ejected_annotations(
+    ejected: List[EjectedAnnotation],
+    final_clusters: List[List[Dict]],
+    overlap_fn,
+    overlap_threshold: float,
+    semantic_map: Optional[SemanticMapping] = None,
+) -> List[List[Dict]]:
+    """
+    Resolves the fate of ejected annotations according to 4 cases:
+
+    Case 1 — same_class_duplicate (any overlap):
+        Discard. The rater drew the same finding twice; the accepted copy already
+        represents them in the cluster.
+
+    Case 2 — different_class_coann, overlaps a cluster the rater is already in:
+        Discard. The rater's accepted annotation is spatially closer; this one
+        lost the spatial competition.
+
+    Case 3 — different_class_coann, overlaps a cluster the rater is NOT in:
+        Join that cluster. The annotation legitimately belongs to a different
+        finding group and no participant constraint is violated.
+
+    Case 4 — different_class_coann, no overlap with any cluster (overlap < threshold):
+        If semantic_map is provided and the ejected class is a known co-occurrence
+        with the source cluster's majority class → keep as singleton secondary finding.
+        Otherwise (no map, or pair not in map) → discard as noise.
+
+    Note on Case 3 ordering: mutations to result_clusters happen in-place during
+    iteration over ejected. This is intentional — each subsequent ejected annotation
+    is checked against the already-updated cluster membership, so a rater who joins
+    a cluster via Case 3 will correctly block a second annotation of theirs from
+    joining the same cluster (Case 2).
+
+    Args:
+        ejected: Tagged ejected annotations from enforce_participant_constraint()
+        final_clusters: Enforced clusters (modified in-place for Case 3 joins)
+        overlap_fn: Overlap function to use — calculate_iou or calculate_iomin
+        overlap_threshold: Minimum overlap to consider two annotations in the same region
+        semantic_map: Optional dataset-specific co-occurrence mapping
+
+    Returns:
+        Final list of clusters (including any Case 4 singletons appended at the end)
+    """
+    # Shallow-copy each cluster list so we can mutate membership without
+    # affecting the caller's original list objects
+    result_clusters = [list(c) for c in final_clusters]
+    extra_singletons = []
+
+    for ej in ejected:
+        ann = ej.annotation
+
+        # Case 1: same-class duplicate — always discard
+        if ej.ejection_reason == 'same_class_duplicate':
+            continue
+
+        # Find the cluster with maximum overlap with this annotation
+        best_idx = None
+        best_overlap = 0.0
+        for idx, cluster in enumerate(result_clusters):
+            cluster_max_overlap = max(
+                (overlap_fn(ann['bbox'], m['bbox']) for m in cluster),
+                default=0.0
+            )
+            if cluster_max_overlap > best_overlap:
+                best_overlap = cluster_max_overlap
+                best_idx = idx
+
+        if best_overlap >= overlap_threshold and best_idx is not None:
+            target = result_clusters[best_idx]
+            rater_already_present = any(
+                m.get('rater_id') == ann.get('rater_id') for m in target
+            )
+            if rater_already_present:
+                # Case 2: discard
+                continue
+            else:
+                # Case 3: join — mutates result_clusters in-place intentionally
+                target.append(ann)
+        else:
+            # Case 4: isolated — decision depends on semantic mapping
+            if (
+                semantic_map is not None
+                and semantic_map.are_semantically_related(
+                    ann.get('class_name'),
+                    ej.source_cluster_majority_class
+                )
+            ):
+                extra_singletons.append([ann])
+            # else: discard
+
+    return result_clusters + extra_singletons
 
 # Valid clustering method identifiers
 VALID_CLUSTERING_METHODS = ['iou', 'iomin', 'iomin_center_gate']
@@ -452,7 +542,8 @@ def cluster_annotations(
     method: str = 'iou',
     iou_threshold: float = 0.5,
     iomin_threshold: float = 0.5,
-    center_ratio_threshold: float = 0.5
+    center_ratio_threshold: float = 0.5,
+    semantic_map: Optional[SemanticMapping] = None,
 ) -> List[List[Dict]]:
     """
     Generic annotation clustering dispatcher.
@@ -474,7 +565,7 @@ def cluster_annotations(
         iomin_threshold: IoMin threshold (used when method='iomin' or 'iomin_center_gate')
         center_ratio_threshold: Center-distance gate threshold 
             (used when method='iomin_center_gate')
-    
+        semantic_map: Optional dataset-specific co-occurrence mapping
     Returns:
         List of clusters, where each cluster is a list of annotations.
         Post-processed by enforce_participant_constraint() to guarantee
@@ -497,8 +588,11 @@ def cluster_annotations(
             f"Valid methods: {VALID_CLUSTERING_METHODS}"
         )
     
-    # Safety net: enforce one-annotation-per-rater invariant
-    return enforce_participant_constraint(clusters)
+    # Enforce one-annotation-per-rater invariant, then resolve ejected annotations
+    enforced_clusters, ejected = enforce_participant_constraint(clusters)
+    overlap_fn = calculate_iou if method == 'iou' else calculate_iomin
+    threshold = iou_threshold if method == 'iou' else iomin_threshold
+    return resolve_ejected_annotations(ejected, enforced_clusters, overlap_fn, threshold, semantic_map)
 
 
 def normalize_annotator_weights(csv_path: str) -> Dict[str, float]:
@@ -548,7 +642,8 @@ def load_and_cluster_data(
     max_images: int = None,
     clustering_method: str = 'iou',
     iomin_threshold: float = 0.5,
-    center_ratio_threshold: float = 0.5
+    center_ratio_threshold: float = 0.5,
+    semantic_map: Optional['SemanticMapping'] = None,
 ) -> Dict[str, List[List[Dict]]]:
     """
     Load VinDr-CXR data, cluster annotations, and organize by class.
@@ -563,7 +658,8 @@ def load_and_cluster_data(
         iomin_threshold: IoMin threshold (used when clustering_method='iomin' or 'iomin_center_gate')
         center_ratio_threshold: Center-distance gate threshold 
             (used when clustering_method='iomin_center_gate')
-    
+        semantic_map: Optional dataset-specific co-occurrence mapping
+            Pass None to discard all ejected annotations (default behaviour).
     Returns:
         Dictionary mapping class names to lists of clusters
     """
@@ -638,7 +734,8 @@ def load_and_cluster_data(
             method=clustering_method,
             iou_threshold=iou_threshold,
             iomin_threshold=iomin_threshold,
-            center_ratio_threshold=center_ratio_threshold
+            center_ratio_threshold=center_ratio_threshold,
+            semantic_map=semantic_map,
         )
         
         # Organize clusters by class (majority vote)

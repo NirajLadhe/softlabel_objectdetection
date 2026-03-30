@@ -105,6 +105,7 @@ def build_step4_command(args) -> list:
         '--iou-threshold', str(args.iou_threshold),
         '--iomin-threshold', str(args.iomin_threshold),
         '--center-ratio-threshold', str(args.center_ratio_threshold),
+        '--semantic-map', args.semantic_map,
         '--iou-reliability', str(args.iou_reliability),
     ]
     if args.max_images is not None:
@@ -128,6 +129,7 @@ def build_step5_command(args) -> list:
         '--iou-threshold', str(args.iou_threshold),
         '--iomin-threshold', str(args.iomin_threshold),
         '--center-ratio-threshold', str(args.center_ratio_threshold),
+        '--semantic-map', args.semantic_map,
         '--iou-reliability', str(args.iou_reliability),
     ]
 
@@ -143,6 +145,7 @@ def main():
     parser.add_argument('--iou-reliability', type=float, default=0.5)
     parser.add_argument('--no-finding-id', type=int, default=14)
     parser.add_argument('--clustering-method', type=str, default='iou', choices=['iou', 'iomin', 'iomin_center_gate'])
+    parser.add_argument('--semantic-map', type=str, default='vindrcxr', choices=['vindrcxr'])
     parser.add_argument('--iou-threshold', type=float, default=0.5)
     parser.add_argument('--iomin-threshold', type=float, default=0.5)
     parser.add_argument('--center-ratio-threshold', type=float, default=0.5)
