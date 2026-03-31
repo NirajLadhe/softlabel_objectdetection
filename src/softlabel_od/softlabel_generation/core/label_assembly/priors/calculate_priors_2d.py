@@ -11,7 +11,7 @@ from softlabel_od.softlabel_generation.utils.clustering import (
     print_clustering_statistics,
     VALID_CLUSTERING_METHODS,
 )
-
+from softlabel_od.softlabel_generation.utils.semantic_mapping import get_semantic_map
 
 def main():
     parser = argparse.ArgumentParser(
@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--min-samples', type=int, default=5)
     parser.add_argument('--clustering-method', type=str, default='iou', choices=VALID_CLUSTERING_METHODS)
     parser.add_argument('--iou-threshold', type=float, default=0.5)
+    parser.add_argument('--semantic-map', type=str, default='vindrcxr', choices=['vindrcxr'])
     parser.add_argument('--iomin-threshold', type=float, default=0.5)
     parser.add_argument('--center-ratio-threshold', type=float, default=0.5)
     parser.add_argument('--max-images', type=int, default=None)
@@ -45,6 +46,7 @@ def main():
         clustering_method=args.clustering_method,
         iomin_threshold=args.iomin_threshold,
         center_ratio_threshold=args.center_ratio_threshold,
+        semantic_map=get_semantic_map(args.semantic_map),
     )
     if not clustered_data:
         print("Error: No clustered data loaded!")

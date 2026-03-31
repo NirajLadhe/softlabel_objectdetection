@@ -33,12 +33,14 @@ dependencies = [
     "seaborn",
     "pandas",
     "iterative-stratification",
+    "kalos",
+    "pylibmgm",        
+    "jsonargparse",    
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "jsonargparse",
 ]
 
 [project.scripts]

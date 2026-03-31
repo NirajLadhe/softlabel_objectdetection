@@ -78,9 +78,14 @@ def build_step2_command(args) -> list:
 
 def build_step3_command(args) -> list:
     return [
-        sys.executable, '-m', 'softlabel_od.softlabel_generation.core.reliability.calculate_pairwise_reliability',
-        '--iou', str(args.iou_reliability), '--no_finding_id', str(args.no_finding_id),
-        '--annotation-path', args.coco_json, '--output-dir', args.reliability_output_dir,
+        sys.executable, '-m',
+        'softlabel_od.softlabel_generation.core.reliability.calculate_reliability',
+        '--iou', str(args.iou_reliability),
+        '--no_finding_id', str(args.no_finding_id),
+        '--annotation-path', args.coco_json,
+        '--output-dir', args.reliability_output_dir,
+        '--backend', args.reliability_backend,
+        '--method', args.reliability_method,
     ]
 
 
@@ -100,6 +105,7 @@ def build_step4_command(args) -> list:
         '--iou-threshold', str(args.iou_threshold),
         '--iomin-threshold', str(args.iomin_threshold),
         '--center-ratio-threshold', str(args.center_ratio_threshold),
+        '--semantic-map', args.semantic_map,
         '--iou-reliability', str(args.iou_reliability),
     ]
     if args.max_images is not None:
@@ -123,6 +129,7 @@ def build_step5_command(args) -> list:
         '--iou-threshold', str(args.iou_threshold),
         '--iomin-threshold', str(args.iomin_threshold),
         '--center-ratio-threshold', str(args.center_ratio_threshold),
+        '--semantic-map', args.semantic_map,
         '--iou-reliability', str(args.iou_reliability),
     ]
 
@@ -138,12 +145,15 @@ def main():
     parser.add_argument('--iou-reliability', type=float, default=0.5)
     parser.add_argument('--no-finding-id', type=int, default=14)
     parser.add_argument('--clustering-method', type=str, default='iou', choices=['iou', 'iomin', 'iomin_center_gate'])
+    parser.add_argument('--semantic-map', type=str, default='vindrcxr', choices=['vindrcxr'])
     parser.add_argument('--iou-threshold', type=float, default=0.5)
     parser.add_argument('--iomin-threshold', type=float, default=0.5)
     parser.add_argument('--center-ratio-threshold', type=float, default=0.5)
     parser.add_argument('--prior-alpha', type=float, default=1.0)
     parser.add_argument('--min-samples', type=int, default=5)
     parser.add_argument('--max-images', type=int, default=None)
+    parser.add_argument('--reliability-backend', type=str, default='kalos', choices=['kalos', 'legacy'], help='Reliability calculation backend.')
+    parser.add_argument('--reliability-method', type=str, default='shm', choices=['greedy', 'shm', 'ahc'], help='Matching algorithm (kalos backend only).')
     args = parser.parse_args()
 
     iou_rel_str = safe_threshold_str(args.iou_reliability)

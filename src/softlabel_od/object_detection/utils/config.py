@@ -48,6 +48,18 @@ def get_cfg_defaults():
     _C.TRAIN.NUM_EPOCHS = 30
     _C.TRAIN.EARLY_STOPPING = False
 
+    # Lightning-specific trainer knobs (do not duplicate TRAIN settings)
+    _C.LIGHTNING = CN()
+    _C.LIGHTNING.ACCELERATOR         = 'cuda'
+    _C.LIGHTNING.DEVICES             = 1 #"auto"
+    _C.LIGHTNING.PRECISION           = 32
+    _C.LIGHTNING.DETERMINISTIC       = False
+    _C.LIGHTNING.LOG_EVERY_N_STEPS   = 1000
+    _C.LIGHTNING.NUM_SANITY_VAL_STEPS = 0
+    _C.LIGHTNING.ENABLE_CHECKPOINTING = False
+    _C.LIGHTNING.ENABLE_PROGRESS_BAR = True
+    _C.LIGHTNING.ACCUMULATE_GRAD_BATCHES = 1
+
     # Augmentation settings
     _C.AUGMENTATION = CN()
     _C.AUGMENTATION.HORIZONTAL_FLIP_PROB = 0.3

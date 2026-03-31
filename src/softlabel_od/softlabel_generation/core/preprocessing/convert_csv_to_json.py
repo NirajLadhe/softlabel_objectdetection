@@ -8,7 +8,7 @@ import os
 import argparse
 
 
-def convert_vindrcxr_to_coco_option_a(csv_file_path, output_json_path, no_finding_class_id=14):
+def convert_vindrcxr_to_coco_json(csv_file_path, output_json_path, no_finding_class_id=14):
     """Convert VinDr-CXR CSV to COCO Option A JSON format."""
     print(f"Starting conversion of {csv_file_path} to {output_json_path} (No Finding ID: {no_finding_class_id})...")
     images_data = {}
@@ -38,7 +38,7 @@ def convert_vindrcxr_to_coco_option_a(csv_file_path, output_json_path, no_findin
 
                 annotation_entry = {
                     "id": annotation_id_counter, "image_id": image_id_csv,
-                    "category_id": class_id, "segmentation": [], "iscrowd": 0, "rater": rad_id
+                    "category_id": class_id, "segmentation": [], "iscrowd": 0, "rater": rad_id, "rater_id": rad_id,
                 }
                 if class_id == no_finding_class_id:
                     annotation_entry["bbox"] = [0, 0, 1, 1]
@@ -106,7 +106,7 @@ def main():
     if not os.path.exists(csv_file):
         print(f"Error: Input CSV file not found at {csv_file}")
     else:
-        convert_vindrcxr_to_coco_option_a(csv_file, json_output_file, no_finding_class_id=args.no_finding_id)
+        convert_vindrcxr_to_coco_json(csv_file, json_output_file, no_finding_class_id=args.no_finding_id)
 
 
 if __name__ == "__main__":
