@@ -106,9 +106,10 @@ def evaluate(args):
     print("\n" + "=" * 70)
     print("MEAN AVERAGE PRECISION")
     print("=" * 70)
-    map_results = compute_map(predictions, ground_truths, iou_thresholds=[0.5, 0.75])
+    map_results = compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75])
     results["mAP"] = {k: float(v) if not isinstance(v, dict) else v for k, v in map_results.items()}
     print(f"  mAP:              {map_results['mAP']:.4f}")
+    print(f"  mAP@40:           {map_results['mAP_40']:.4f}")
     print(f"  mAP@50:           {map_results['mAP_50']:.4f}")
     print(f"  mAP@75:           {map_results['mAP_75']:.4f}")
     print(f"\n  Per-class AP@50:")
