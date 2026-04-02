@@ -42,6 +42,8 @@ class BaseDetectionLightningModule(pl.LightningModule):
             backbone_name=cfg.MODEL.BACKBONE,
             pretrained=True,
             probabilistic=cfg.MODEL.PROBABILISTIC,
+            anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+            anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
         )
 
     # ------------------------------------------------------------------

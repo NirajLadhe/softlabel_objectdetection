@@ -34,6 +34,8 @@ def get_cfg_defaults():
     _C.MODEL.PROBABILISTIC = True
     _C.MODEL.ROI_HEAD_BUFFER_FREQ_TERM = 'inverse' # Choose between "inverse", "inverse_sqrt"
     _C.MODEL.ROI_HEAD_BUFFER_MAX_WEIGHT = 15.0 # Maximum weight for the buffer
+    _C.MODEL.ANCHOR_SIZES = [[32], [64], [128], [256], [512]]
+    _C.MODEL.ANCHOR_ASPECT_RATIOS = [[0.33, 0.5, 0.75, 1.0, 2.0, 3.0]]
     # Training settings
     _C.TRAIN = CN()
     _C.TRAIN.BASE_LR_BBOX = 0.005

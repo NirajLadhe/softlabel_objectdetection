@@ -116,7 +116,6 @@ def main():
         accumulate_grad_batches=cfg.LIGHTNING.ACCUMULATE_GRAD_BATCHES,
         logger=tb_logger,
         callbacks=callbacks,
-        # log_every_n_steps=cfg.LIGHTNING.LOG_EVERY_N_STEPS,
         enable_checkpointing=cfg.LIGHTNING.ENABLE_CHECKPOINTING,    
         enable_progress_bar=cfg.LIGHTNING.ENABLE_PROGRESS_BAR,
         deterministic=cfg.LIGHTNING.DETERMINISTIC,

@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from torch.utils.data import WeightedRandomSampler
 from collections import Counter
-
+from torchvision.models.detection.anchor_utils import AnchorGenerator
 
 # ---------------------------------------------------------------------------
 # Data collation
@@ -33,6 +33,20 @@ def collate_fn(batch):
         return [], []
     return tuple(zip(*batch))
 
+
+# ---------------------------------------------------------------------------
+# Anchor generator: INPUT FROM CONFIG YAML
+# Input: either a list of lists or a tuple of tuples
+# ---------------------------------------------------------------------------
+
+def _nested_lists_to_tuples_of_tuples(nested):
+    return tuple(tuple(level) for level in nested)
+ 
+def create_anchor_generator(anchor_sizes, aspect_ratios):
+    return AnchorGenerator(
+        sizes=_nested_lists_to_tuples_of_tuples(anchor_sizes),
+        aspect_ratios=_nested_lists_to_tuples_of_tuples(aspect_ratios),
+    )
 
 # ---------------------------------------------------------------------------
 # Rater weights

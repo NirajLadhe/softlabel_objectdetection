@@ -23,9 +23,11 @@ from softlabel_od.object_detection.core.evaluation.metrics import (
 from softlabel_od.object_detection.core.evaluation.runner import load_model, collect_predictions
 from softlabel_od.object_detection.utils.training_helpers import collate_fn
 from softlabel_od.object_detection.utils.transforms import Compose, ToTensor
+from softlabel_od.object_detection.utils.config import get_cfg_from_file
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
+cfg = get_cfg_from_file(args.config)
 
 
 def evaluate(args):
@@ -35,13 +37,6 @@ def evaluate(args):
     is_hard = args.gmm_type == "HARD_LABEL"
     probabilistic = not is_hard
     label_mode = "hard" if is_hard else f"soft_{args.gmm_type.lower()}"
-
-    # if args.output:
-    #     output_path = os.path.join(args.output, f"eval_results_{args.eval_tag}.json")
-    #     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    # else:
-    #     output_path = os.path.join(PROJECT_ROOT, "outputs/evaluation_results", f"eval_results_{args.eval_tag}.json")
-    #     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     print(f"\nCreating {label_mode} validation dataset...")
     dataset_cls = get_dataset_class(args.dataset)
@@ -72,7 +67,9 @@ def evaluate(args):
     model_type=args.gmm_type,
     backbone=args.backbone, 
     probabilistic=probabilistic, 
-    device=device)
+    device=device,
+    anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+    anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS*len(cfg.MODEL.ANCHOR_SIZES))
 
     predictions, ground_truths = collect_predictions(model, val_loader, device=device, is_probabilistic=probabilistic)
     print(f"Collected predictions for {len(predictions)} images")
@@ -183,9 +180,9 @@ def evaluate(args):
 weights = os.path.join(PROJECT_ROOT, "outputs/saved_models/SoftLabel_1D_30Epoch_iou0_5_Lambda2_1_1_lr0_001.pth")
 label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json")
 
-
 def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained detection model")
+    parser.add_argument("--config", type=str, default=os.path.join(PROJECT_ROOT, "configs/1d_softlabel_config_albers.yaml"), required=True)
     parser.add_argument("--eval-tag", type=str, default="1D_Gaussian_softlabels_iou0_5", required=True)
     parser.add_argument("--weights", type=str, default=weights, required=True)
     parser.add_argument("--gmm-type", type=str, default="1D", required=True, choices=["1D", "HARD_LABEL"])

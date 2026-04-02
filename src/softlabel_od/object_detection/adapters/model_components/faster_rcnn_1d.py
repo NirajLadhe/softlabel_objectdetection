@@ -11,6 +11,7 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 
+from softlabel_od.object_detection.utils.training_helpers import create_anchor_generator
 from softlabel_od.object_detection.utils.losses import (
     soft_cross_entropy_loss,
     soft_focal_loss,
@@ -481,7 +482,7 @@ class HardLabelRoIHeads(RoIHeads):
         return result, losses
 
         
-def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabilistic=True):
+def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabilistic=True, anchor_sizes=None, anchor_aspect_ratios=None):
     if backbone_name in ('resnet50', 'resnet101'):
         backbone = resnet_fpn_backbone(
             backbone_name=backbone_name,
@@ -498,12 +499,14 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
     else:
         raise ValueError(f"Backbone '{backbone_name}' is not supported.")
     
-    # Anchor generator: Anchor siezes and aspect ratios derived from anchor analysis on training set
+    # Anchor generator: Anchor sizes and aspect ratios derived from anchor analysis on training set
     # Review: add anchor generator to config file
-    anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
-    aspect_ratios = ((0.33, 0.5, 0.75, 1.0, 2.0, 3.0),) * 5
-    anchor_generator = AnchorGenerator(sizes=anchor_sizes, aspect_ratios=aspect_ratios)
-    
+    # anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
+    # aspect_ratios = ((0.33, 0.5, 0.75, 1.0, 2.0, 3.0),) * 5
+    # anchor_generator = AnchorGenerator(sizes=anchor_sizes, aspect_ratios=aspect_ratios)
+
+    anchor_generator = create_anchor_generator(anchor_sizes, anchor_aspect_ratios*len(anchor_sizes))
+
     # Create the model using the specified backbone
     model = FasterRCNN(
         backbone, 

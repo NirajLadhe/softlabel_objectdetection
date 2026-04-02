@@ -15,7 +15,7 @@ Adding a new architecture
 """
 
 
-def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained=True, probabilistic=True):
+def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained=True, probabilistic=True, anchor_sizes=None, anchor_aspect_ratios=None):
     """
     Factory function to get the appropriate detection model.
 
@@ -25,13 +25,14 @@ def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained
         backbone_name:  'resnet50', 'resnet101', or 'mobilenet'.
         pretrained:     Use ImageNet-pretrained backbone weights.
         probabilistic:  Use probabilistic GMM head (only relevant for model_type='1d').
-
+        anchor_sizes:   Anchor sizes (list of lists).
+        anchor_aspect_ratios: Anchor aspect ratios (list of lists).
     Returns:
         A torch.nn.Module ready for training.
     """
     if model_type in ("1d", "1D"):
         from softlabel_od.object_detection.adapters.model_components.faster_rcnn_1d import get_model_1d
-        return get_model_1d(num_classes, backbone_name, pretrained, probabilistic)
+        return get_model_1d(num_classes, backbone_name, pretrained, probabilistic, anchor_sizes, anchor_aspect_ratios)
 
     elif model_type in ("2d", "2D"):
         from softlabel_od.object_detection.adapters.model_components.faster_rcnn_2d import get_model_2d
@@ -39,7 +40,7 @@ def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained
 
     elif model_type in ("hard", "HARD_LABEL"):
         from softlabel_od.object_detection.adapters.model_components.faster_rcnn_1d import get_model_1d
-        return get_model_1d(num_classes, backbone_name, pretrained, probabilistic=False)
+        return get_model_1d(num_classes, backbone_name, pretrained, probabilistic=False, anchor_sizes=anchor_sizes, anchor_aspect_ratios=anchor_aspect_ratios)
 
     else:
         raise ValueError(

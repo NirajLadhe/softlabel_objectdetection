@@ -17,9 +17,11 @@ MODEL:
   PROBABILISTIC: True
   ROI_HEAD_BUFFER_FREQ_TERM: 'inverse' # Choose between "inverse", "inverse_sqrt"
   ROI_HEAD_BUFFER_MAX_WEIGHT: 15.0 # Maximum weight for the buffer
+  ANCHOR_SIZES: [[32], [64], [128], [256], [512]]
+  ANCHOR_ASPECT_RATIOS: [[0.33, 0.5, 0.75, 1.0, 2.0, 3.0]]
 
 MISC:
-  RUN_NAME: 'SoftLabel_1D_30Epoch_iou0_5_Lambda2_1_1_lr0_001'
+  RUN_NAME: 'vindrcxr_gaussian_softlabels_iou0_5_30Epochs_resnet50'
   RESULTS_CSV: '../outputs/training_metric_logs'
   SAVE_MODEL_PATH: '../outputs/saved_models'
   EVALUATION_RESULTS_DIR: '../outputs/evaluation_results'
@@ -37,8 +39,17 @@ TRAIN:
   GAMMA: 0.5
   BATCH_SIZE: 4
   OVERFIT_BATCHES: 0
-  NUM_EPOCHS: 1
-  EARLY_STOPPING: True
+  NUM_EPOCHS: 30
+  EARLY_STOPPING: False
+
+LIGHTNING:
+  ACCELERATOR: 'cuda'
+  PRECISION: 32
+  DETERMINISTIC: False
+  NUM_SANITY_VAL_STEPS: 0
+  ENABLE_CHECKPOINTING: False
+  ENABLE_PROGRESS_BAR: True
+  ACCUMULATE_GRAD_BATCHES: 1
 
 AUGMENTATION:
   HORIZONTAL_FLIP_PROB: 0.5 # 0.5 (float)

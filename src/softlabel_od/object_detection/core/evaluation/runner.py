@@ -3,7 +3,7 @@ import torch
 from tqdm import tqdm
 
 from softlabel_od.object_detection.core.model.factory import get_model
-def load_model(weights_path, num_classes, model_type, backbone, probabilistic, device):
+def load_model(weights_path, num_classes, model_type, backbone, probabilistic, device, anchor_sizes=None, anchor_aspect_ratios=None):
     """Load model from checkpoint."""
     model = get_model(
         num_classes=num_classes,
@@ -11,6 +11,8 @@ def load_model(weights_path, num_classes, model_type, backbone, probabilistic, d
         backbone_name=backbone,
         pretrained=False,
         probabilistic=probabilistic,
+        anchor_sizes=anchor_sizes,
+        anchor_aspect_ratios=anchor_aspect_ratios,
     )
 
     checkpoint = torch.load(weights_path, map_location=device, weights_only=False)
