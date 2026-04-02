@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import pytorch_lightning as pl
 
-from softlabel_od.object_detection.adapters.lightning.lightning_base_module import (
+from softlabel_od.object_detection.core.lightning.lightning_base_module import (
     BaseDetectionLightningModule,
 )
 from softlabel_od.object_detection.core.evaluation.metrics import (

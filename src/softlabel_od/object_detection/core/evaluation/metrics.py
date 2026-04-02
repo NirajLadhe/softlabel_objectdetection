@@ -104,7 +104,7 @@ def match_predictions_to_gt(pred_boxes, pred_scores, gt_boxes, iou_threshold=0.5
     return matches, unmatched_preds, unmatched_gts
 
 
-def compute_map(predictions, ground_truths, iou_thresholds=[0.5, 0.75]):
+def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
     """
     Compute mean Average Precision at specified IoU thresholds.
     
@@ -661,6 +661,73 @@ def compute_bbox_uncertainty_calibration(predictions, ground_truths, iou_thresho
         'avg_actual_error': np.mean(actual_errors_all),
         'calibration_ratio': calibration_ratio,
     }
+
+
+def compute_detection_summary(predictions, ground_truths):
+    """Compute per-image detection counts: matches, missed GT, false positives."""
+    total_gt = 0
+    total_pred = 0
+    total_matched = 0
+    total_missed = 0
+    total_fp = 0
+
+    for pred, gt in zip(predictions, ground_truths):
+        n_gt = len(gt['boxes'])
+        n_pred = len(pred['boxes'])
+        total_gt += n_gt
+        total_pred += n_pred
+
+        if n_pred == 0 or n_gt == 0:
+            total_missed += n_gt
+            total_fp += n_pred
+            continue
+
+        matches, unmatched_preds, unmatched_gts = match_predictions_to_gt(
+            pred['boxes'], pred['scores'], gt['boxes'], iou_threshold=0.5
+        )
+        total_matched += len(matches)
+        total_missed += len(unmatched_gts)
+        total_fp += len(unmatched_preds)
+
+    recall = total_matched / max(total_gt, 1)
+    precision = total_matched / max(total_pred, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-8)
+
+    return {
+        'total_gt_boxes': total_gt,
+        'total_pred_boxes': total_pred,
+        'total_matched': total_matched,
+        'total_missed_gt': total_missed,
+        'total_false_positives': total_fp,
+        'recall': recall,
+        'precision': precision,
+        'f1_score': f1,
+    }
+
+
+def compute_iou_stats(predictions, ground_truths):
+    """Compute IoU statistics over matched predictions."""
+    all_ious = []
+    for pred, gt in zip(predictions, ground_truths):
+        if len(pred['boxes']) == 0 or len(gt['boxes']) == 0:
+            continue
+        matches, _, _ = match_predictions_to_gt(
+            pred['boxes'], pred['scores'], gt['boxes'], iou_threshold=0.5
+        )
+        for _, _, iou in matches:
+            all_ious.append(iou)
+
+    if not all_ious:
+        return {'avg_iou': 0.0, 'median_iou': 0.0, 'std_iou': 0.0, 'num_matches': 0}
+
+    ious = np.array(all_ious)
+    return {
+        'avg_iou': float(np.mean(ious)),
+        'median_iou': float(np.median(ious)),
+        'std_iou': float(np.std(ious)),
+        'num_matches': len(ious),
+    }
+
 
 def evaluate_comprehensive(model, data_loader, device, save_path=None):
     """

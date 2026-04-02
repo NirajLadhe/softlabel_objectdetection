@@ -8,7 +8,7 @@ Validation matches validate_hard_labels() in train_hard.py.
 import numpy as np
 import torch
 
-from softlabel_od.object_detection.adapters.lightning.lightning_base_module import (
+from softlabel_od.object_detection.core.lightning.lightning_base_module import (
     BaseDetectionLightningModule,
 )
 from softlabel_od.object_detection.core.evaluation.metrics import match_predictions_to_gt

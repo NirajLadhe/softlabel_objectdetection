@@ -37,6 +37,11 @@ class DetectionDatasetPort(ABC, torch.utils.data.Dataset):
     @abstractmethod
     def class_to_idx(self) -> Dict[str, int]:
         """Mapping from canonical class names to foreground indices."""
+    
+    @property
+    def class_names(self) -> Dict[int, str]:
+        """Mapping from foreground index to class name. Derived from class_to_idx."""
+        return {v: k for k, v in self.class_to_idx.items()}
 
     @property
     @abstractmethod
