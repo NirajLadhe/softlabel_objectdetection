@@ -166,23 +166,6 @@ class BaseDetectionLightningModule(pl.LightningModule):
             epoch_scheduler = cosine_scheduler
         else:
             raise ValueError(f"Unsupported scheduler: {self.cfg.TRAIN.SCHEDULER}")
-        # return {
-        #     "optimizer": optimizer,
-        #     "lr_scheduler": [
-        #         {
-        #             "scheduler": warmup_scheduler,
-        #             "interval": "step",
-        #             "frequency": 1,
-        #             "name": "warmup",
-        #         },
-        #         {
-        #             "scheduler": epoch_scheduler,
-        #             "interval": "epoch",
-        #             "frequency": 1,
-        #             "name": "epoch_lr",
-        #         },
-        #     ],
-        # }
         return (
             [optimizer],
             [

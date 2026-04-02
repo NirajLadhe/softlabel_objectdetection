@@ -51,7 +51,7 @@ def get_cfg_defaults():
     # Lightning-specific trainer knobs (do not duplicate TRAIN settings)
     _C.LIGHTNING = CN()
     _C.LIGHTNING.ACCELERATOR         = 'cuda'
-    _C.LIGHTNING.DEVICES             = 1 #"auto"
+    _C.LIGHTNING.DEVICES             = "auto"
     _C.LIGHTNING.PRECISION           = 32
     _C.LIGHTNING.DETERMINISTIC       = False
     _C.LIGHTNING.LOG_EVERY_N_STEPS   = 1000

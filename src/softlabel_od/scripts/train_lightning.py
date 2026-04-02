@@ -13,10 +13,10 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, Learning
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from softlabel_od.object_detection.utils.config import get_cfg_from_file, resolve_label_mode
-from softlabel_od.object_detection.adapters.lightning.lightning_datamodule import (
+from softlabel_od.object_detection.core.lightning.lightning_datamodule import (
     DetectionLightningDataModule,
 )
-from softlabel_od.object_detection.adapters.lightning.lightning_callbacks import (
+from softlabel_od.object_detection.core.lightning.lightning_callbacks import (
     ExportBestPthCallback,
 )
 
@@ -26,17 +26,17 @@ DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "1d_softlabel_config_albe
 
 def _get_module_class(label_mode: str):
     if label_mode == "soft_1d":
-        from softlabel_od.object_detection.adapters.lightning.lightning_1d_module import (
+        from softlabel_od.object_detection.core.lightning.lightning_1d_module import (
             SoftLabel1DLightningModule,
         )
         return SoftLabel1DLightningModule
     if label_mode == "soft_2d":
-        from softlabel_od.object_detection.adapters.lightning.lightning_2d_module import (
+        from softlabel_od.object_detection.core.lightning.lightning_2d_module import (
             SoftLabel2DLightningModule,
         )
         return SoftLabel2DLightningModule
     if label_mode == "hard":
-        from softlabel_od.object_detection.adapters.lightning.lightning_hard_module import (
+        from softlabel_od.object_detection.core.lightning.lightning_hard_module import (
             HardLabelLightningModule,
         )
         return HardLabelLightningModule
@@ -45,17 +45,17 @@ def _get_module_class(label_mode: str):
 
 def _get_history_logger(label_mode: str, cfg):
     if label_mode == "soft_1d":
-        from softlabel_od.object_detection.adapters.lightning.lightning_metrics_logger import (
+        from softlabel_od.object_detection.core.lightning.lightning_metrics_logger import (
             Phase1JSONHistoryLogger,
         )
         return Phase1JSONHistoryLogger(cfg, print_summary=True)
     if label_mode == "hard":
-        from softlabel_od.object_detection.adapters.lightning.lightning_metric_logger_hard import (
+        from softlabel_od.object_detection.core.lightning.lightning_metric_logger_hard import (
             HardJSONHistoryLogger,
         )
         return HardJSONHistoryLogger(cfg, print_summary=True)
     # 2D: fall back to a minimal logger until a dedicated one is added
-    from softlabel_od.object_detection.adapters.lightning.lightning_metric_logger_hard import (
+    from softlabel_od.object_detection.core.lightning.lightning_metric_logger_hard import (
         HardJSONHistoryLogger,
     )
     return HardJSONHistoryLogger(cfg, print_summary=True)
@@ -99,7 +99,7 @@ def main():
     if cfg.TRAIN.EARLY_STOPPING:
         if label_mode == "soft_1d":
             # Use the composite early stopping matching train_1d.py exactly
-            from softlabel_od.object_detection.adapters.lightning.lightning_callbacks import (
+            from softlabel_od.object_detection.core.lightning.lightning_callbacks import (
                 CompositeEarlyStopping1D,
             )
             callbacks.append(CompositeEarlyStopping1D())

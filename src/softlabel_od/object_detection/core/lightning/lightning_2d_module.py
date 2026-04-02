@@ -7,7 +7,7 @@ Validation matches validate_soft_labels_2d() in train_2d.py.
 
 import torch
 
-from softlabel_od.object_detection.adapters.lightning.lightning_base_module import (
+from softlabel_od.object_detection.core.lightning.lightning_base_module import (
     BaseDetectionLightningModule,
 )
 
