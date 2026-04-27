@@ -230,6 +230,12 @@ Builds probabilistic labels from multi-annotator annotations.
 Coordinates normalized to [0, 1].
 </details>  
 
+<details>
+<summary> Soft Label generation Pipeline Flow Diagram </summary>
+![Flow diagram: preprocessing and aggregation](images/Pipeline_flow3_light.png)
+
+</details>
+
 
 ### `object_detection`
 
