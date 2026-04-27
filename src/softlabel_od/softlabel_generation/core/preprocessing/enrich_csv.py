@@ -10,7 +10,7 @@ import os
 # Configuration
 JSON_FILE = '/media/klee_ro/public_datasets/vindr_cxr/train.json'
 INPUT_CSV = '/media/klee_ro/public_datasets/vindr_cxr/train.csv'
-OUTPUT_CSV = '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/train_enriched.csv'
+OUTPUT_CSV = '/home/niraj/softlabel_objectdetection/outputs/vindrcxr/train_enriched.csv'
 IMAGE_DIR = '/media/klee_ro/public_datasets/vindr_cxr/train/'
 
 # Load JSON data

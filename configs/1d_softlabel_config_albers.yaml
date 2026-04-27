@@ -1,6 +1,6 @@
 DATA:
   DATASET: 'VinDr-CXR'
-  ROOT: '/media/klee_ro/public_datasets/vindr_cxr'
+  ROOT: 'media/klee_ro/public_datasets/vindr_cxr'
   SOFT_LABEL_FILE_1D: '../outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json'
   SOFT_LABEL_FILE_2D: '../outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json'
   HARD_LABEL_FILE: '../outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json'
