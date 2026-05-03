@@ -179,22 +179,22 @@ python -m softlabel_od.scripts.run_pipeline \
 `/home/niraj/Assignment2/docs/lvis_first5_softlabels.md`
 
 ### Visualized high-disagreement examples at:
-`/home/niraj/Assignment2/outputs/lvis/visualizations`
+`/home/niraj/Assignment2/Images`
 
 #### Image 1
-![High disagreement image 1](home/niraj/softlabel_objectdetection/Assignment2/Images/lvis_disagreement_1_lvis_274687.png)
+![High disagreement image 1](../Images/lvis_disagreement_1_lvis_274687.png)
 
 #### Image 2
-![High disagreement image 2](home/niraj/softlabel_objectdetection/Assignment2/Images/lvis_disagreement_2_lvis_71226.png)
+![High disagreement image 2](../Images/lvis_disagreement_2_lvis_71226.png)
 
 #### Image 3
-![High disagreement image 3](home/niraj/softlabel_objectdetection/Assignment2/Images/lvis_disagreement_3_lvis_317433.png)
+![High disagreement image 3](../Images/lvis_disagreement_3_lvis_317433.png)
 
 #### Image 4
-![High disagreement image 4](home/niraj/softlabel_objectdetection/Assignment2/Images/lvis_disagreement_4_lvis_18575.png)
+![High disagreement image 4](../Images/lvis_disagreement_4_lvis_18575.png)
 
 #### Image 5
-![High disagreement image 5](home/niraj/softlabel_objectdetection/Assignment2/Images/lvis_disagreement_5_lvis_266400.png)
+![High disagreement image 5](../Images/lvis_disagreement_5_lvis_266400.png)
 
 
 
