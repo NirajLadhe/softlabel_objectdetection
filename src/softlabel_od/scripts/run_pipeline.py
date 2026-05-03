@@ -8,6 +8,8 @@ Steps: 1) Normalize CSV, 2) Convert to COCO JSON, 3) Reliability (K-alpha),
 """
 
 import argparse
+from email import parser
+from html import parser
 import subprocess
 import sys
 import os
@@ -67,12 +69,45 @@ def build_step1_command(args) -> list:
         '--input-csv', args.input_csv, '--output-csv', args.normalized_csv,
     ]
 
+#================== lvis-specific step 1 command builder (can be ignored for VinDr-CXR) =======================================================
+def build_step1_command(args) -> list:
+    if args.dataset == "lvis":
+        cmd = [
+            sys.executable, "-m",
+            "softlabel_od.softlabel_generation.core.preprocessing.preprocess_lvis",
+            "--input-json", args.raw_lvis_json,
+            "--output-dir", args.lvis_output_dir,
+        ]
+        if args.max_images is not None:
+            cmd.extend(["--max-images", str(args.max_images)])
+        return cmd
+
+    return [
+        sys.executable, "-m", "softlabel_od.softlabel_generation.core.preprocessing.manipulate_csv",
+        "--input-csv", args.input_csv,
+        "--output-csv", args.normalized_csv,
+    ]
 
 def build_step2_command(args) -> list:
     return [
         sys.executable, '-m', 'softlabel_od.softlabel_generation.core.preprocessing.convert_csv_to_json',
         '--input-csv', args.normalized_csv, '--output-json', args.coco_json,
         '--no-finding-id', str(args.no_finding_id),
+    ]
+
+#================== lvis-specific step 2 command builder (can be ignored for VinDr-CXR) =======================================================
+def build_step2_command(args) -> list:
+    if args.dataset == "lvis":
+        return [
+            sys.executable, "-c",
+            f"import os; print('LVIS COCO JSON already created: {args.coco_json}'); assert os.path.exists('{args.coco_json}')"
+        ]
+
+    return [
+        sys.executable, "-m", "softlabel_od.softlabel_generation.core.preprocessing.convert_csv_to_json",
+        "--input-csv", args.normalized_csv,
+        "--output-json", args.coco_json,
+        "--no-finding-id", str(args.no_finding_id),
     ]
 
 
@@ -154,14 +189,27 @@ def main():
     parser.add_argument('--max-images', type=int, default=None)
     parser.add_argument('--reliability-backend', type=str, default='kalos', choices=['kalos', 'legacy'], help='Reliability calculation backend.')
     parser.add_argument('--reliability-method', type=str, default='shm', choices=['greedy', 'shm', 'ahc'], help='Matching algorithm (kalos backend only).')
+#======= for LVIS-specific pipeline arguments (can be ignored for VinDr-CXR) =======================================================
+    parser.add_argument("--dataset", type=str, default="vindrcxr", choices=["vindrcxr", "lvis"])
+    parser.add_argument("--raw-lvis-json", type=str, default="/media/klee_ro/public_datasets/coco_lvis/lvis_standardized_lvis_val.json")
+    parser.add_argument("--lvis-output-dir", type=str, default=os.path.join(PROJECT_ROOT, "outputs/lvis"))
     args = parser.parse_args()
+    dataset_name = args.dataset.lower().replace("-", "_")
 
+    if args.dataset == "lvis":
+        args.input_csv = os.path.join(args.lvis_output_dir, "lvis_train_enriched_normalized.csv")
+        args.normalized_csv = args.input_csv
+        args.coco_json = os.path.join(args.lvis_output_dir, "lvis_train_all.json")
+        args.semantic_map = "lvis"
+        args.no_finding_id = -1
+
+#==================changes based on dataset aware names===========
     iou_rel_str = safe_threshold_str(args.iou_reliability)
     clustering_suffix = build_clustering_suffix(args)
-    args.reliability_output_dir = os.path.join(PROJECT_ROOT, "outputs/raters_reliability/annotator_reliability_vindrcxr")
-    args.weights_csv = os.path.join(args.reliability_output_dir, f"annotator_reliability_scores_vindrcxr_iou{iou_rel_str}.csv")
-    args.priors_path = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/priors", f"class_priors_{args.gmm_mode}_{clustering_suffix}.json")
-    args.output_json = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels", f"{args.gmm_mode.upper()}GMM_softLabels_{clustering_suffix}_with_priors.json")
+    args.reliability_output_dir = os.path.join(PROJECT_ROOT, "outputs","raters_reliability",f"annotator_reliability_{dataset_name}")
+    args.weights_csv = os.path.join(args.reliability_output_dir, f"annotator_reliability_scores_{dataset_name}_iou{iou_rel_str}.csv")
+    args.priors_path = os.path.join(PROJECT_ROOT, f"outputs/{dataset_name}/1d_gaussian_softlabels/priors", f"class_priors_{args.gmm_mode}_{clustering_suffix}.json")
+    args.output_json = os.path.join(PROJECT_ROOT, f"outputs/{dataset_name}/1d_gaussian_softlabels", f"{args.gmm_mode.upper()}GMM_softLabels_{clustering_suffix}_with_priors.json")
 
     steps_to_run = args.steps if args.steps else ALL_STEPS
     invalid = [s for s in steps_to_run if s not in ALL_STEPS]

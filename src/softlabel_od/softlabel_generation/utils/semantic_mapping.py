@@ -38,6 +38,11 @@ VINDRCXR_SEMANTIC_MAP = SemanticMapping.from_pairs(
     ]
 )
 
+LVIS_SEMANTIC_MAP = SemanticMapping.from_pairs(
+    dataset_name="lvis",
+    pairs=[]
+)
+
 # ===================End of Dataset-specific semantic maps here====================================================
 
 
@@ -49,4 +54,5 @@ def get_semantic_map(dataset_name: str) -> SemanticMapping | None:
 # ===============Add new semantic maps to the dictionary here=====================================================
 SEMANTIC_MAPS = {
     "vindrcxr": VINDRCXR_SEMANTIC_MAP,
+    "lvis": LVIS_SEMANTIC_MAP,
 }

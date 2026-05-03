@@ -51,6 +51,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Calculate annotator reliability scores."
     )
+    parser.add_argument("--dataset-name", type=str, default="vindrcxr")
     parser.add_argument("--annotation-path", type=str, required=True)
     parser.add_argument("--iou", type=float, default=0.5)
     parser.add_argument("--no_finding_id", type=int, default=14)   # kept for compat
@@ -74,7 +75,7 @@ def main():
         return
 
     safe_iou_str = str(args.iou).replace(".", "_")
-    output_path = os.path.join(args.output_dir, f"annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv")
+    output_path = os.path.join(args.output_dir, f"annotator_reliability_scores_{args.dataset_name}_iou{safe_iou_str}.csv")
     save_reliability_scores(scores, output_path)
     print(f"Reliability scores saved to {output_path}")
 

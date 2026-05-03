@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--min-samples', type=int, default=5)
     parser.add_argument('--clustering-method', type=str, default='iou', choices=VALID_CLUSTERING_METHODS)
-    parser.add_argument('--semantic-map', type=str, default='vindrcxr', choices=['vindrcxr'])
+    parser.add_argument('--semantic-map', type=str, default='vindrcxr', choices=['vindrcxr','lvis'])
     parser.add_argument('--iou-threshold', type=float, default=0.5)
     parser.add_argument('--iomin-threshold', type=float, default=0.5)
     parser.add_argument('--center-ratio-threshold', type=float, default=0.5)
