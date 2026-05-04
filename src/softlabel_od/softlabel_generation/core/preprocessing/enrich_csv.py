@@ -11,6 +11,8 @@ import os
 JSON_FILE = '/media/klee_ro/public_datasets/vindr_cxr/train.json'
 INPUT_CSV = '/media/klee_ro/public_datasets/vindr_cxr/train.csv'
 OUTPUT_CSV = '/home/haaroon/softlabel_object_detection/outputs/vindrcxr/train_enriched.csv'
+OUTPUT_DIR = os.path.dirname(OUTPUT_CSV)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 IMAGE_DIR = '/media/klee_ro/public_datasets/vindr_cxr/train/'
 
 # Load JSON data

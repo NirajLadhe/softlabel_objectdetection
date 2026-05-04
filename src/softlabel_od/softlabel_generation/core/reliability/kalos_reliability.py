@@ -75,8 +75,9 @@ class KalosReliabilityCalculator(ReliabilityCalculator):
                     for img in raw_data.get("images", [])}
         for ann in raw_data.get("annotations", []):
             bbox = ann.get("bbox", [])
+            w, h = img_dims.get(ann["image_id"], (1, 1)) 
             if bbox == [0, 0, 1, 1]:
-                w, h = img_dims.get(ann["image_id"], (1, 1))
+                # w, h = img_dims.get(ann["image_id"], (1, 1)
                 ann["bbox"] = [0, 0, w, h]
             else:
                 ann["bbox"] = [bbox[0]*w, bbox[1]*h, bbox[2]*w, bbox[3]*h]

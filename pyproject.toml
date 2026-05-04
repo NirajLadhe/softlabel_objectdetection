@@ -22,8 +22,8 @@ dependencies = [
     "krippendorff",
     "tqdm",
     "shapely",
-    "torch",
-    "torchvision",
+    "torch==2.5.1+cu124",
+    "torchvision==0.20.1+cu124",
     "pytorch-lightning>=2.0",
     "yacs",
     "pyyaml",
@@ -35,7 +35,9 @@ dependencies = [
     "iterative-stratification",
     "kalos",
     "pylibmgm",        
-    "jsonargparse",    
+    "jsonargparse",
+    "tensorboard",
+    "tensorboardX",    
 ]
 
 [project.optional-dependencies]

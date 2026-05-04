@@ -27,13 +27,14 @@ from softlabel_od.object_detection.utils.config import get_cfg_from_file
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
-cfg = get_cfg_from_file(args.config)
+
 
 
 def evaluate(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
     print(f"Device: {device}")
 
+    cfg = get_cfg_from_file(args.config)
     is_hard = args.gmm_type == "HARD_LABEL"
     probabilistic = not is_hard
     label_mode = "hard" if is_hard else f"soft_{args.gmm_type.lower()}"
@@ -103,9 +104,10 @@ def evaluate(args):
     print("\n" + "=" * 70)
     print("MEAN AVERAGE PRECISION")
     print("=" * 70)
-    map_results = compute_map(predictions, ground_truths, iou_thresholds=[0.5, 0.75])
+    map_results = compute_map(predictions, ground_truths, iou_thresholds=[0.4,0.5, 0.75])
     results["mAP"] = {k: float(v) if not isinstance(v, dict) else v for k, v in map_results.items()}
     print(f"  mAP:              {map_results['mAP']:.4f}")
+    print(f"  mAP@40:           {map_results['mAP_40']:.4f}")
     print(f"  mAP@50:           {map_results['mAP_50']:.4f}")
     print(f"  mAP@75:           {map_results['mAP_75']:.4f}")
     print(f"\n  Per-class AP@50:")
@@ -177,7 +179,7 @@ def evaluate(args):
     print(f"Results saved to: {output_json}")
     print("=" * 70)
 
-weights = os.path.join(PROJECT_ROOT, "outputs/saved_models/SoftLabel_1D_30Epoch_iou0_5_Lambda2_1_1_lr0_001.pth")
+
 label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json")
 
 def main():
