@@ -53,7 +53,7 @@ def main():
     )
     parser.add_argument("--annotation-path", type=str, required=True)
     parser.add_argument("--iou", type=float, default=0.5)
-    parser.add_argument("--no_finding_id", type=int, default=14)   # kept for compat
+    parser.add_argument("--no_finding_id", type=int, default=14)   # kept for compatiblity with vindrcxr
     parser.add_argument(
         "--output-dir", type=str,
         default="outputs/raters_reliability/annotator_reliability_vindrcxr"
