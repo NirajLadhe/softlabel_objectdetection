@@ -487,7 +487,7 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
         backbone = resnet_fpn_backbone(
             backbone_name=backbone_name,
             weights='ResNet50_Weights.IMAGENET1K_V1' if backbone_name == 'resnet50' else 'ResNet101_Weights.IMAGENET1K_V1',
-            trainable_layers=3
+            trainable_layers=5
         )
         # FPN always outputs 256 channels regardless of backbone depth
         # out_channels is set automatically
