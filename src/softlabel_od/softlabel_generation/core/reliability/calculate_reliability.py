@@ -53,13 +53,11 @@ def main():
     )
     parser.add_argument("--annotation-path", type=str, required=True)
     parser.add_argument("--iou", type=float, default=0.5)
-    parser.add_argument("--no_finding_id", type=int, default=14)   # kept for compatiblity with vindrcxr
-    parser.add_argument(
-        "--output-dir", type=str,
-        default="outputs/raters_reliability/annotator_reliability_vindrcxr"
-    )
+    parser.add_argument("--no-finding-id", type=int, default=None, help="class_id for 'No Finding'; omit if dataset has no such class.")
+    parser.add_argument("--output-dir", type=str, default="outputs/raters_reliability")
     parser.add_argument("--backend", type=str, default="kalos", choices=["kalos"], help="Reliability calculation backend.")
     parser.add_argument("--method", type=str, default="shm", choices=["greedy", "shm", "ahc"], help="Matching algorithm (kalos backend only).")
+    parser.add_argument("--dataset-name", type=str, default="vindrcxr", required=True, help="Dataset name. Used to construct the output directory path.")
     args = parser.parse_args()
 
     if not os.path.exists(args.annotation_path):
@@ -74,7 +72,7 @@ def main():
         return
 
     safe_iou_str = str(args.iou).replace(".", "_")
-    output_path = os.path.join(args.output_dir, f"annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv")
+    output_path = os.path.join(args.output_dir, f"annotator_reliability_scores_{args.dataset_name}_iou{safe_iou_str}.csv")
     save_reliability_scores(scores, output_path)
     print(f"Reliability scores saved to {output_path}")
 

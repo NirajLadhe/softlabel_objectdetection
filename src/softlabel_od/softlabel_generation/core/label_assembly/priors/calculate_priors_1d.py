@@ -26,17 +26,18 @@ def main():
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--min-samples', type=int, default=5)
     parser.add_argument('--clustering-method', type=str, default='iou', choices=VALID_CLUSTERING_METHODS)
-    parser.add_argument('--semantic-map', type=str, default='vindrcxr', choices=['vindrcxr'])
+    parser.add_argument('--semantic-map', type=str, default=None, help="Registered semantic map name, or omit for none.")
     parser.add_argument('--iou-threshold', type=float, default=0.5)
     parser.add_argument('--iomin-threshold', type=float, default=0.5)
     parser.add_argument('--center-ratio-threshold', type=float, default=0.5)
     parser.add_argument('--max-images', type=int, default=None)
     parser.add_argument('--iou-reliability', type=float, default=0.5)
+    parser.add_argument('--no-finding-labels', type=str, nargs='*', default=['No finding', 'No findings'])
     args = parser.parse_args()
 
     if args.weights_csv is None:
         safe_iou_str = str(args.iou_reliability).replace('.', '_')
-        args.weights_csv = os.path.join(PROJECT_ROOT, 'outputs/raters_reliability/annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv')
+        args.weights_csv = os.path.join(PROJECT_ROOT, f'outputs/raters_reliability/annotator_reliability_scores_vindrcxr_iou{safe_iou_str}.csv')
 
     if not os.path.exists(args.train_csv) or not os.path.exists(args.weights_csv):
         print(f"Error: Required file not found.")
@@ -48,7 +49,7 @@ def main():
         clustering_method=args.clustering_method,
         iomin_threshold=args.iomin_threshold,
         center_ratio_threshold=args.center_ratio_threshold,
-        semantic_map=get_semantic_map(args.semantic_map),
+        semantic_map=get_semantic_map(args.semantic_map) if args.semantic_map else None,
     )
     if not clustered_data:
         print("Error: No clustered data loaded!")
