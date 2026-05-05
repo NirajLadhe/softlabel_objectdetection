@@ -93,6 +93,13 @@ def main():
                         help="Inject implicit no-finding votes for raters absent from a cluster.")
     parser.add_argument("--no-absent-rater-vote", dest="absent_rater_vote", action="store_false",
                         help="Disable absent-rater vote injection.")
+    parser.add_argument("--image-id-key", type=str, default="file_name", choices=["file_name", "id"],
+        help="JSON image entry field used to build the image_id key. "
+            "Use 'file_name' (default, strips extension) for datasets like VinDr-CXR. "
+            "Use 'id' for COCO-native datasets like MultiOrg where the integer id "
+            "is the canonical identifier.",
+    )
+
     parser.set_defaults(absent_rater_vote=False)
 
     args = parser.parse_args()
@@ -133,8 +140,11 @@ def main():
     # Strip the file extension generically so this works for .dicom, .jpg, etc.
     image_metadata = {}
     for img_entry in raters_json.get("images", []):
-        file_name = img_entry.get("file_name", "")
-        image_id = str(os.path.splitext(file_name)[0])
+        if args.image_id_key == "id":
+            image_id = str(img_entry.get("id"))
+        else:  # "file_name"
+            file_name = img_entry.get("file_name", "")
+            image_id = str(os.path.splitext(file_name)[0])
         image_metadata[image_id] = {
             "width": img_entry.get("width"),
             "height": img_entry.get("height"),

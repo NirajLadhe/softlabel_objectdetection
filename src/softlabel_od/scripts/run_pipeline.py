@@ -168,6 +168,7 @@ def build_step4_command(cfg, paths) -> list:
         "--iomin-threshold", str(cfg.PIPELINE.iomin_threshold),
         "--center-ratio-threshold", str(cfg.PIPELINE.center_ratio_threshold),
         "--iou-reliability", str(cfg.PIPELINE.iou_reliability),
+        "--dataset-name", cfg.DATASET.name,
     ]
     semantic_map = _get(cfg.PIPELINE, "semantic_map", None)
     if semantic_map:
@@ -204,6 +205,7 @@ def build_step5_command(cfg, paths) -> list:
         "--iomin-threshold", str(cfg.PIPELINE.iomin_threshold),
         "--center-ratio-threshold", str(cfg.PIPELINE.center_ratio_threshold),
         "--iou-reliability", str(cfg.PIPELINE.iou_reliability),
+        "--image-id-key", _get(cfg.DATASET, "image_id_key", "file_name"),
     ]
     semantic_map = _get(cfg.PIPELINE, "semantic_map", None)
     if semantic_map:

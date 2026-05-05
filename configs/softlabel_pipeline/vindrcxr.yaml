@@ -7,6 +7,7 @@ DATASET:
   image_id_col: "image_id"
   class_name_col: "class_name"
   absent_rater_vote: true
+  image_id_key: "file_name"
 
 PIPELINE:
   gmm_mode: "1d"
