@@ -76,8 +76,10 @@ def load_all_data_for_gmm(
         raise ValueError(f"CSV must have columns: {required}")
 
     df["rad_id"] = df["rad_id"].astype(str)
+    df["image_id"] = df["image_id"].astype(str)   # normalize
     all_image_ids = df["image_id"].unique()
     image_data = {}
+
 
     for img_id in tqdm(all_image_ids, desc="Loading Annotations"):
         rows = df[df["image_id"] == img_id]
