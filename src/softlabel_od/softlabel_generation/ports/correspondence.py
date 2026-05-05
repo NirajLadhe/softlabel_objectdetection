@@ -46,6 +46,7 @@ class AHCAdapter(CorrespondenceSolver):
         **kwargs
     ) -> List[List[Dict[str, Any]]]:
         from softlabel_od.softlabel_generation.utils.clustering import cluster_annotations
+        from softlabel_od.softlabel_generation.utils.semantic_mapping import get_semantic_map
 
         method = distance_metric if distance_metric in ("iou", "iomin", "iomin_center_gate") else "iou"
         return cluster_annotations(
