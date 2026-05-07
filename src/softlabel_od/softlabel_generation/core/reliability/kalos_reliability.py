@@ -62,11 +62,16 @@ class KalosReliabilityCalculator(ReliabilityCalculator):
         }
 
         # Collect all raters across the dataset
-        all_raters = sorted({
-            rater
-            for img in raw_data.get("images", [])
-            for rater in img.get("rater_list", [])
-        })
+        all_raters = set()
+        for img in raw_data.get("images", []):
+            rater_list = img.get("rater_list", [])
+            if isinstance(rater_list, dict):
+                all_raters.update(rater_list.keys())
+            elif isinstance(rater_list, list):
+                all_raters.update(rater_list)
+            elif isinstance(rater_list, str):
+                all_raters.add(rater_list)
+        all_raters = sorted(all_raters)
 
         if not all_raters:
             return []

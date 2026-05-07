@@ -1,23 +1,21 @@
 """
-Dataset adapters for annotation loading.
+Dataset adapters for annotation preprocessing.
 
-Each adapter normalises a dataset's raw annotation format into the unified
-dict structure expected by the core pipeline:
-    {
-        'image_id': str,
-        'rater_id': str,
-        'class_name': str,
-        'bbox': [x, y, w, h],   # normalised [0, 1]
-        'weight': float,
-    }
-
-Existing adapters
------------------
-VinDrCXR — VinDr-CXR CSV + COCO JSON (see scripts/manipulate_csv.py,
-            scripts/convert_csv_to_json.py for the pre-processing steps).
+Each adapter normalises a dataset's raw CSV into the canonical column format
+expected by the core pipeline. See ports/dataset_adapter.py for the contract.
 
 Adding a new dataset
 --------------------
-1. Create a new file, e.g. texbig.py, implementing the same output dict.
-2. Register it here with an import.
+1. Create <yourdata>.py in this directory, subclassing DatasetPreprocessingAdapter
+   (or NullAdapter if only minor changes are needed).
+2. Register it below with register_adapter().
+3. Add a config at configs/softlabel_pipeline/<yourdata>.yaml.
 """
+
+from softlabel_od.softlabel_generation.adapters.datasets.registry import register_adapter
+from softlabel_od.softlabel_generation.adapters.datasets.vindrcxr import VinDrCXRAdapter
+from softlabel_od.softlabel_generation.adapters.datasets.null_adapter import NullAdapter
+
+register_adapter("vindrcxr", VinDrCXRAdapter)
+register_adapter("vindr-cxr", VinDrCXRAdapter)   # alias
+register_adapter("null", NullAdapter)
