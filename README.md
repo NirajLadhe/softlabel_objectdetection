@@ -74,16 +74,19 @@ pip install -e .
 
 #### 1. Prepare your data
 
-Put your dataset files in a local path and set the paths in a YAML config.
+Write a pre-pipeline ingestion script (or use an existing one from `src/softlabel_od/scripts/`) to convert your dataset into the canonical CSV format.
+<details>
+<summary>Canonical CSV Format</summary>
 
-For VinDr-CXR, the default workflow expects:
-- images under `data/vinbigdata/train`
-- annotation CSVs and generated outputs under `outputs/vindrcxr`
+<strong>Columns: </strong>`image_id`, `rad_id`, `class_name`, `class_id`, `x_min`, `y_min`, `x_max`, `y_max`, `width`, `height`
+
+</details>
+Place your raw data and set output paths in a YAML config under `configs/softlabel_pipeline/`.
 
 #### 2. Generate soft labels
 
 ```bash
-python -m softlabel_od.scripts.run_pipeline
+python -m softlabel_od.scripts.run_pipeline --config configs/softlabel_pipeline/<your_dataset>.yaml
 ```
 
 #### 3. Train a detector
@@ -139,9 +142,11 @@ Builds probabilistic labels from multi-annotator annotations.
 
 - `ports/`
   - correspondence and clustering interfaces
+  - `DatasetPreprocessingAdapter` — abstract contract for CSV normalization
 
 - `adapters/datasets/`
-  - dataset-specific annotation loaders
+  - dataset-specific preprocessing adapters
+  - adapter registry (maps dataset name → adapter class)
 
 - `utils/`
   - clustering helpers
@@ -345,21 +350,26 @@ softlabel-evaluate
 Equivalent module calls:
 
 ```bash
-python -m softlabel_od.scripts.run_pipeline
-python -m softlabel_od.scripts.train --config configs/vindr_cxr_1d_config.yaml
-python -m softlabel_od.scripts.train_lightning --config configs/vindr_cxr_1d_config.yaml
-python -m softlabel_od.scripts.evaluate --weights outputs/saved_models/model.pth --gmm_type 1D
+python -m softlabel_od.scripts.run_pipeline --config configs/softlabel_pipeline/<dataset>.yaml
+python -m softlabel_od.scripts.train --config configs/<your-training-config>.yaml
+python -m softlabel_od.scripts.train_lightning --config configs/<your-training-config>.yaml
+python -m softlabel_od.scripts.evaluate --weights outputs/saved_models/<model-weights>.pth --gmm_type 1D
 ```
 
 <details>
 <summary><strong>Common pipeline options</strong></summary>
 
+All pipeline parameters (`gmm_mode`, `clustering_method`, thresholds, etc.) live in the dataset YAML config. The CLI only exposes three flags:
+
 ```bash
-python -m softlabel_od.scripts.run_pipeline --gmm-mode 1d
-python -m softlabel_od.scripts.run_pipeline --clustering-method iomin --iomin-threshold 0.5
-python -m softlabel_od.scripts.run_pipeline --clustering-method iomin_center_gate --iomin-threshold 0.5 --center-ratio-threshold 0.5
-python -m softlabel_od.scripts.run_pipeline --steps 4 5
-python -m softlabel_od.scripts.run_pipeline --dry-run
+# Run the full pipeline for a dataset
+python -m softlabel_od.scripts.run_pipeline --config configs/softlabel_pipeline/<dataset>.yaml
+
+# Run specific steps only (e.g. reliability onwards)
+python -m softlabel_od.scripts.run_pipeline --config configs/softlabel_pipeline/<dataset>.yaml --steps 3 4 5
+
+# Preview commands without executing
+python -m softlabel_od.scripts.run_pipeline --config configs/softlabel_pipeline/<dataset>.yaml --dry-run
 ```
 
 </details>
@@ -374,9 +384,59 @@ Dataset extension is now config-driven on the object detection side.
 [Dataset Rule Book](src/softlabel_od/object_detection/DATASET_RULEBOOK.md)
 
 **Soft label generation workflow**
-1. Add dataset-specific preprocessing / loading under `src/softlabel_od/softlabel_generation/adapters/datasets/`
-2. Map raw annotations into the expected intermediate format
-3. Keep coordinates and class names consistent with the downstream label schema
+
+1. **Write an ingestion script** in `src/softlabel_od/scripts/` to convert your raw data into the canonical CSV format (columns: `image_id`, `rad_id`, `class_name`, `class_id`, `x_min`, `y_min`, `x_max`, `y_max`, `width`, `height`). Optionally also produce the COCO JSON required by Step 3.
+
+2. **Create an adapter** in `src/softlabel_od/softlabel_generation/adapters/datasets/<yourdata>.py`. Subclass `DatasetPreprocessingAdapter` for custom normalization logic, or `NullAdapter` if your ingestion script already outputs normalized `[0, 1]` coordinates.
+
+3. **Register the adapter** in `adapters/datasets/__init__.py`:
+   ```python
+   from softlabel_od.softlabel_generation.adapters.datasets.yourdata import YourDataAdapter
+   register_adapter("yourdata", YourDataAdapter)
+   ```
+
+4. **Add a config** at `configs/softlabel_pipeline/<yourdata>.yaml`:
+   ```yaml
+   DATASET:
+     name: "yourdata"
+     no_finding_labels: []        # list label strings that mean "no finding", or leave empty
+     absent_rater_vote: false     # true if unannotated images count as a "no finding" vote
+     image_id_key: "file_name"    # "file_name" (strip extension) or "id" (COCO integer id)
+
+   PIPELINE:
+     gmm_mode: "1d"               # "1d" or "2d"
+     clustering_method: "iou"     # "iou", "iomin", or "iomin_center_gate"
+     iou_threshold: 0.5
+     iomin_threshold: 0.5
+     center_ratio_threshold: 0.5
+     iou_reliability: 0.5
+     prior_alpha: 1.0
+     min_samples: 5
+     semantic_map: null           # registered semantic map name, or null for none
+     reliability_backend: "kalos"
+     reliability_method: "shm"
+
+   PATHS:
+     input_csv: "outputs/yourdata/train_enriched.csv"
+     output_dir: "outputs/yourdata"
+     reliability_dir: "outputs/raters_reliability/yourdata"
+   ```
+
+5. **Run the pipeline**, skipping steps already handled by your ingestion script:
+
+   | What your ingestion script produces | Steps to run |
+   |-------------------------------------|--------------|
+   | Canonical CSV with pixel-coordinate bboxes | `1 2 3 4 5` (default) |
+   | Canonical CSV with normalized `[0, 1]` bboxes | `2 3 4 5` |
+   | Canonical CSV + COCO JSON, both normalized | `3 4 5` |
+
+   ```bash
+   # Full pipeline
+   python -m softlabel_od.scripts.run_pipeline --config configs/softlabel_pipeline/yourdata.yaml
+
+   # Skip normalization and COCO conversion (CSV + JSON already prepared)
+   python -m softlabel_od.scripts.run_pipeline --config configs/softlabel_pipeline/yourdata.yaml --steps 3 4 5
+   ```
 
 <details>
 <summary><strong>Object detection dataset config example</strong></summary>
