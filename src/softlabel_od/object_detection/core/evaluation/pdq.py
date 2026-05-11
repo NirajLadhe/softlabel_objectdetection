@@ -1,6 +1,7 @@
 # pdq.py
 
 import numpy as np
+from tqdm import tqdm
 
 try:
     from scipy.optimize import linear_sum_assignment
@@ -33,7 +34,7 @@ class PDQEvaluator:
     }
     """
 
-    def __init__(self, eps=1e-12, min_std=1.0):
+    def __init__(self, eps=1e-6, min_std=1.0):
         self.eps = eps
         self.min_std = min_std
 
@@ -180,11 +181,20 @@ class PDQEvaluator:
 
         prob_map = np.clip(prob_map, self.eps, 1.0 - self.eps)
 
-        fg_probs = prob_map[gt_mask]
-        bg_probs = prob_map[~gt_mask]
+        fg_probs = np.clip(
+            prob_map[gt_mask].astype(np.float64),
+            self.eps,
+            1.0 - self.eps,
+        )
+
+        bg_probs = np.clip(
+            prob_map[~gt_mask].astype(np.float64),
+            self.eps,
+            1.0 - self.eps,
+        )
 
         fg_loss = -np.sum(np.log(fg_probs)) / gt_area
-        bg_loss = -np.sum(np.log(1.0 - bg_probs)) / gt_area
+        bg_loss = -np.sum(np.log1p(-bg_probs)) / gt_area
 
         spatial_quality = float(np.exp(-(fg_loss + bg_loss)))
         spatial_quality = float(np.clip(spatial_quality, 0.0, 1.0))
@@ -337,7 +347,11 @@ class PDQEvaluator:
         total_fp = 0
         total_fn = 0
 
-        for pred, gt in zip(predictions, ground_truths):
+        for pred, gt in tqdm(
+            zip(predictions, ground_truths),
+            total=len(predictions),
+            desc="Computing PDQ",
+        ):
             image_result = self._evaluate_single_image(pred, gt)
 
             total_pdq_sum += image_result["pdq_sum"]
