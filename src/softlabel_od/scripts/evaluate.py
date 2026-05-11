@@ -9,6 +9,7 @@ import os
 import numpy as np
 import torch
 
+from softlabel_od.object_detection.core.evaluation.pdq import PDQEvaluator
 from softlabel_od.object_detection.adapters.datasets import get_dataset_class
 from softlabel_od.object_detection.core.evaluation.metrics import (
     compute_map,
@@ -76,6 +77,24 @@ def evaluate(args):
     print(f"Collected predictions for {len(predictions)} images")
 
     results = {}
+
+    print("\n" + "=" * 70)
+    print("PDQ METRICS")
+    print("=" * 70)
+
+    pdq_evaluator = PDQEvaluator()
+    pdq_results = pdq_evaluator.evaluate(predictions, ground_truths)
+
+    results["pdq"] = pdq_results
+
+    print(f"  PDQ:              {pdq_results['pdq']:.4f}")
+    print(f"  Avg pPDQ:         {pdq_results['avg_pPDQ']:.4f}")
+    print(f"  Avg Spatial Q:    {pdq_results['avg_spatial_quality']:.4f}")
+    print(f"  Avg Label Q:      {pdq_results['avg_label_quality']:.4f}")
+    print(f"  TP:               {pdq_results['tp']}")
+    print(f"  FP:               {pdq_results['fp']}")
+    print(f"  FN:               {pdq_results['fn']}")
+
 
     print("\n" + "=" * 70)
     print("DETECTION SUMMARY")
@@ -186,7 +205,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained detection model")
     parser.add_argument("--config", type=str, default=os.path.join(PROJECT_ROOT, "configs/1d_softlabel_config_albers.yaml"), required=True)
     parser.add_argument("--eval-tag", type=str, default="1D_Gaussian_softlabels_iou0_5", required=True)
-    parser.add_argument("--weights", type=str, default=weights, required=True)
+    parser.add_argument("--weights", type=str, default=None, required=True)
     parser.add_argument("--gmm-type", type=str, default="1D", required=True, choices=["1D", "HARD_LABEL"])
     parser.add_argument("--dataset", type=str, default="vindrcxr", help="Registered dataset adapter name")
     parser.add_argument("--label-file", type=str, default=label_file)
@@ -199,8 +218,8 @@ def main():
     parser.add_argument("--cpu", action="store_true")
     args = parser.parse_args()
 
-    if args.weights is None:
-        args.weights = weights
+    # if args.weights is None:
+    #     args.weights = weights
     if args.label_file is None:
         args.label_file = label_file
     
