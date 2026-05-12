@@ -14,8 +14,12 @@ Adding a new dataset
 
 from softlabel_od.softlabel_generation.adapters.datasets.registry import register_adapter
 from softlabel_od.softlabel_generation.adapters.datasets.vindrcxr import VinDrCXRAdapter
+from softlabel_od.softlabel_generation.adapters.datasets.lvis import LVISAdapter
 from softlabel_od.softlabel_generation.adapters.datasets.null_adapter import NullAdapter
 
 register_adapter("vindrcxr", VinDrCXRAdapter)
 register_adapter("vindr-cxr", VinDrCXRAdapter)   # alias
+register_adapter("lvis", LVISAdapter)
+register_adapter("coco-lvis", LVISAdapter)       # alias
+register_adapter("coco_lvis", LVISAdapter)       # alias
 register_adapter("null", NullAdapter)
