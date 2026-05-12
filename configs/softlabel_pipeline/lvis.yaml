@@ -1,0 +1,28 @@
+DATASET:
+  name: "lvis"
+  no_finding_labels: []
+  no_finding_id: -1
+  image_file_extension: ".dicom"
+  annotator_id_col: "rad_id"
+  image_id_col: "image_id"
+  class_name_col: "class_name"
+  absent_rater_vote: true
+  image_id_key: "file_name"
+
+PIPELINE:
+  gmm_mode: "1d"
+  clustering_method: "iou"
+  iou_threshold: 0.5
+  iomin_threshold: 0.5
+  center_ratio_threshold: 0.5
+  iou_reliability: 0.5
+  prior_alpha: 1.0
+  min_samples: 5
+  semantic_map: "lvis"
+  reliability_backend: "kalos"
+  reliability_method: "ahc"
+
+PATHS:
+  input_csv: "outputs/lvis/lvis_train_enriched_normalized.csv"
+  output_dir: "outputs/lvis"
+  reliability_dir: "outputs/raters_reliability/annotator_reliability_lvis"
