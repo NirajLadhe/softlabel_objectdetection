@@ -9,6 +9,7 @@ DATA:
   BALANCED_SAMPLER: True
   OVERSAMPLE_FACTOR: 0.25 # 1.0/ RFS THRESHOLD
   IGNORE_NOFINDING: False
+  NOFINDING_WEIGHT_GIVEN: True
 
 MODEL:
   NUM_CLASSES: 15
@@ -16,12 +17,14 @@ MODEL:
   PROBABILISTIC: False  # Standard Faster R-CNN head
   ROI_HEAD_BUFFER_FREQ_TERM: 'inverse' # Choose between "inverse", "inverse_sqrt"
   ROI_HEAD_BUFFER_MAX_WEIGHT: 15.0 # Maximum weight for the buffer
+  ANCHOR_SIZES: [[32], [64], [128], [256], [512]]
+  ANCHOR_ASPECT_RATIOS: [[0.33, 0.5, 0.75, 1.0, 2.0, 3.0]]
 
 MISC:
-  RUN_NAME: 'HardLabel_30Epoch_iou0_5_RFS_Sampler_Alpha0_5'
+  RUN_NAME: 'vindrcxr_hardLabel_30Epoch_iou0_5'
   RESULTS_CSV: '../outputs/training_metric_logs'
-  SAVE_MODEL_PATH: '../outputs/saved_models'
-  EVALUATION_RESULTS_DIR: '../outputs/evaluation_results'
+  SAVE_MODEL_PATH: '../outputs/saved_models/vindrcxr/hard_labels'
+  EVALUATION_RESULTS_DIR: '../outputs/vindrcxr/hard_labels/evaluation_results'
   PRETRAINED_WEIGHTS: ''
   FROZEN_LAYERS: []
   NO_CUDA: False

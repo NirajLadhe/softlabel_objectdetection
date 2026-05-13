@@ -7,7 +7,7 @@ DATA:
   GMM_TYPE: '1D' 
   TEST_SPLIT_RATIO: 0.20
   BALANCED_SAMPLER: True
-  OVERSAMPLE_FACTOR: 0.15   # RFS THRESHOLD
+  OVERSAMPLE_FACTOR: 0.25   # RFS THRESHOLD
   IGNORE_NOFINDING: False
   NOFINDING_WEIGHT_GIVEN: True
 
@@ -23,8 +23,8 @@ MODEL:
 MISC:
   RUN_NAME: 'vindrcxr_gaussian_softlabels_iou0_5_30Epochs_resnet50'
   RESULTS_CSV: '../outputs/training_metric_logs'
-  SAVE_MODEL_PATH: '../outputs/saved_models'
-  EVALUATION_RESULTS_DIR: '../outputs/evaluation_results'
+  SAVE_MODEL_PATH: '../outputs/saved_models/vindrcxr/1d_gaussian_softlabels'
+  EVALUATION_RESULTS_DIR: '../outputs/vindrcxr/1d_gaussian_softlabels/evaluation_results'
   PRETRAINED_WEIGHTS: ''
   FROZEN_LAYERS: []
   NO_CUDA: False

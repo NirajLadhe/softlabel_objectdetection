@@ -78,7 +78,7 @@ def get_cfg_defaults():
     _C.MISC.RUN_NAME = 'vindr_cxr_softlabel_1d'
     _C.MISC.RESULTS_CSV = os.path.join(project_root_ext, 'outputs/training_metric_logs')
     _C.MISC.SAVE_MODEL_PATH = os.path.join(project_root_ext, 'outputs/saved_models')
-    _C.MISC.EVALUATION_RESULTS_DIR = os.path.join(project_root_ext, 'outputs/evaluation_results')
+    _C.MISC.EVALUATION_RESULTS_DIR = os.path.join(project_root_ext, 'outputs/vindrcxr/evaluation_results')
     _C.MISC.PRETRAINED_WEIGHTS = ''
     _C.MISC.FROZEN_LAYERS = []
     _C.MISC.NO_CUDA = False
