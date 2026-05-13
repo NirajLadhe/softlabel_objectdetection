@@ -25,5 +25,5 @@ from softlabel_od.object_detection.core.evaluation.metrics import (
     compute_bbox_uncertainty_calibration,
     compute_uncertainty_weighted_map,
     compute_soft_class_metrics,
-    evaluate_comprehensive,
+    evaluate_default_metrics,
 )

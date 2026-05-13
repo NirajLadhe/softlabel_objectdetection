@@ -729,94 +729,87 @@ def compute_iou_stats(predictions, ground_truths):
     }
 
 
-def evaluate_comprehensive(model, data_loader, device, save_path=None):
-    """
-    PHASE 2: Comprehensive evaluation function.
-    
-    Run this AFTER training on a held-out hard-label validation set.
-    """
-    model.eval()
-    
-    predictions = []
-    ground_truths = []
-    
-    print("Running comprehensive evaluation...")
-    
-    with torch.no_grad():
-        for images, targets in data_loader:
-            images = [img.to(device) for img in images]
-            outputs = model(images)
-            
-            for output, target in zip(outputs, targets):
-                pred_entry = {
-                    'boxes': output['boxes'].cpu().numpy(),
-                    'labels': output['labels'].cpu().numpy(),
-                    'scores': output['scores'].cpu().numpy(),
-                }
-                
-                # Add probabilistic outputs if available
-                if 'bbox_means' in output:
-                    pred_entry['bbox_means'] = output['bbox_means'].cpu().numpy()
-                if 'bbox_stds' in output:
-                    pred_entry['bbox_stds'] = output['bbox_stds'].cpu().numpy()
-                if 'class_probs' in output:
-                    pred_entry['class_probs'] = output['class_probs'].cpu().numpy()
-                
-                gt_entry = {
-                    'boxes': target['boxes'].cpu().numpy(),
-                    'labels': target['labels'].cpu().numpy(),
-                }
-                
-                if 'gt_class_probs' in target:
-                    gt_entry['gt_class_probs'] = target['gt_class_probs'].cpu().numpy()
-                
-                predictions.append(pred_entry)
-                ground_truths.append(gt_entry)
-    
-    
-    # Compute all metrics
-    print("\n" + "="*60)
-    print("COMPREHENSIVE EVALUATION RESULTS")
-    print("="*60)
-    
+def evaluate_default_metrics(
+    predictions,
+    ground_truths,
+    *,
+    class_names=None,
+    gmm_type="1D",
+    probabilistic=False,
+    **kwargs,
+):
+    """Run the repository's standard evaluation metrics."""
+    class_names = class_names or {}
     results = {}
-    
-    # Standard detection metrics
-    print("\n📊 Standard Detection Metrics:")
-    map_metrics = compute_map(predictions, ground_truths)
-    results.update(map_metrics)
-    print(f"  mAP: {map_metrics['mAP']:.3f}")
-    print(f"  mAP@50: {map_metrics['mAP_50']:.3f}")
-    print(f"  mAP@75: {map_metrics['mAP_75']:.3f}")
-    
-    # Probabilistic metrics
-    print("\n🎲 Probabilistic Metrics:")
-    results['expected_iou'] = compute_expected_iou(predictions, ground_truths)
-    results['calibration_error'] = compute_calibration_error(predictions, ground_truths)
-    results['uncertainty_weighted_mAP'] = compute_uncertainty_weighted_map(predictions, ground_truths)
-    print(f"  Expected IoU: {results['expected_iou']:.3f}")
-    print(f"  Calibration Error (ECE): {results['calibration_error']:.3f}")
-    print(f"  Uncertainty-weighted mAP: {results['uncertainty_weighted_mAP']:.3f}")
-    
-    # Soft label metrics (if available)
-    if any('class_probs' in p for p in predictions):
-        print("\n🔀 Soft Label Metrics:")
-        soft_metrics = compute_soft_class_metrics(predictions, ground_truths)
-        results.update(soft_metrics)
-        print(f"  KL Divergence: {soft_metrics['kl_div']:.3f}")
-        print(f"  JS Divergence: {soft_metrics['js_div']:.3f}")
-        print(f"  Soft Accuracy: {soft_metrics['soft_acc']:.2%}")
-    
-    print("="*60)
-    
-    # Save results
-    if save_path:
-        import json
-        with open(save_path, 'w') as f:
-            # Convert numpy types to Python types for JSON
-            results_serializable = {k: float(v) if isinstance(v, (np.floating, np.integer)) else v 
-                                   for k, v in results.items()}
-            json.dump(results_serializable, f, indent=2)
-        print(f"\n💾 Results saved to: {save_path}")
-    
+    print("\n" + "=" * 70)
+    print("DETECTION SUMMARY")
+    print("=" * 70)
+    det_summary = compute_detection_summary(predictions, ground_truths)
+    results["detection_summary"] = det_summary
+    print(f"  GT boxes:         {det_summary['total_gt_boxes']}")
+    print(f"  Predicted boxes:  {det_summary['total_pred_boxes']}")
+    print(f"  Matched (TP):     {det_summary['total_matched']}")
+    print(f"  Missed GT (FN):   {det_summary['total_missed_gt']}")
+    print(f"  False Pos (FP):   {det_summary['total_false_positives']}")
+    print(f"  Precision:        {det_summary['precision']:.4f}")
+    print(f"  Recall:           {det_summary['recall']:.4f}")
+    print(f"  F1 Score:         {det_summary['f1_score']:.4f}")
+    print("\n" + "=" * 70)
+    print("IoU STATISTICS (matched predictions)")
+    print("=" * 70)
+    iou_stats = compute_iou_stats(predictions, ground_truths)
+    results["iou_stats"] = iou_stats
+    print(f"  Avg IoU:          {iou_stats['avg_iou']:.4f}")
+    print(f"  Median IoU:       {iou_stats['median_iou']:.4f}")
+    print(f"  Std IoU:          {iou_stats['std_iou']:.4f}")
+    print(f"  Num matches:      {iou_stats['num_matches']}")
+    print("\n" + "=" * 70)
+    print("MEAN AVERAGE PRECISION")
+    print("=" * 70)
+    map_results = compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75])
+    results["mAP"] = {k: float(v) if not isinstance(v, dict) else v for k, v in map_results.items()}
+    print(f"  mAP:              {map_results['mAP']:.4f}")
+    print(f"  mAP@40:           {map_results['mAP_40']:.4f}")
+    print(f"  mAP@50:           {map_results['mAP_50']:.4f}")
+    print(f"  mAP@75:           {map_results['mAP_75']:.4f}")
+    print(f"\n  Per-class AP@50:")
+    for cls_idx, ap in sorted(map_results.get("per_class_ap", {}).items()):
+        cls_name = class_names.get(int(cls_idx), f"Class {cls_idx}")
+        print(f"    {cls_name:25s}: {float(ap):.4f}")
+    print("\n" + "=" * 70)
+    print("CALIBRATION")
+    print("=" * 70)
+    ece = compute_calibration_error(predictions, ground_truths)
+    results["ece"] = float(ece)
+    print(f"  ECE:              {ece:.4f}")
+    if probabilistic:
+        print("\n" + "=" * 70)
+        print("SOFT LABEL METRICS")
+        print("=" * 70)
+        soft_metrics = compute_soft_detection_metrics(predictions, ground_truths)
+        results["soft_detection"] = {k: float(v) for k, v in soft_metrics.items()}
+        print(f"  Top-1 Accuracy:   {soft_metrics['top1_accuracy']:.4f}")
+        print(f"  Top-3 Accuracy:   {soft_metrics['top3_accuracy']:.4f}")
+        print(f"  Weighted Acc:     {soft_metrics['weighted_accuracy']:.4f}")
+        print(f"  Total matched:    {soft_metrics['total_matched']}")
+        dist_metrics = compute_class_distribution_metrics(predictions, ground_truths)
+        results["distribution"] = {
+            k: float(v) if not isinstance(v, (list, dict)) else v
+            for k, v in dist_metrics.items()
+        }
+        print(f"  JS Divergence:    {dist_metrics['js_divergence']:.4f}")
+        print(f"  KL Divergence:    {dist_metrics['kl_divergence']:.4f}")
+        print(f"  Cosine Sim:       {dist_metrics['cosine_similarity']:.4f}")
+        print("\n" + "=" * 70)
+        print("BBOX UNCERTAINTY METRICS")
+        print("=" * 70)
+        expected_iou = compute_expected_iou(predictions, ground_truths, num_samples=100)
+        results["expected_iou"] = float(expected_iou)
+        print(f"  Expected IoU:     {expected_iou:.4f}")
+        bbox_cal = compute_bbox_uncertainty_calibration(predictions, ground_truths)
+        results["bbox_calibration"] = {k: float(v) for k, v in bbox_cal.items()}
+        print(f"  Std-Error Corr:   {bbox_cal['std_error_correlation']:.4f}")
+        print(f"  Avg Pred Std:     {bbox_cal['avg_pred_std']:.4f}")
+        print(f"  Avg Actual Err:   {bbox_cal['avg_actual_error']:.4f}")
+        print(f"  Calibration Rat:  {bbox_cal['calibration_ratio']:.4f}")
     return results
