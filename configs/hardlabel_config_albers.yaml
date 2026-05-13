@@ -21,7 +21,7 @@ MISC:
   RUN_NAME: 'HardLabel_30Epoch_iou0_5_RFS_Sampler_Alpha0_5'
   RESULTS_CSV: '../outputs/training_metric_logs'
   SAVE_MODEL_PATH: '../outputs/saved_models'
-  EVALUATION_RESULTS_DIR: '../outputs/evaluation_results'
+  EVALUATION_RESULTS_DIR: '../outputs/vindrcxr/hard_labels/evaluation_results'
   PRETRAINED_WEIGHTS: ''
   FROZEN_LAYERS: []
   NO_CUDA: False
