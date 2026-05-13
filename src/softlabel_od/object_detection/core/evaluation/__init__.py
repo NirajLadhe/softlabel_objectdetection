@@ -27,3 +27,5 @@ from softlabel_od.object_detection.core.evaluation.metrics import (
     compute_soft_class_metrics,
     evaluate_default_metrics,
 )
+
+from softlabel_od.object_detection.core.evaluation.tide import evaluate_tide

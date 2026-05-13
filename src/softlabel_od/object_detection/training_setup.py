@@ -247,6 +247,8 @@ def build_model(cfg, model_type: str, device=None):
         backbone_name=cfg.MODEL.BACKBONE,
         pretrained=True,
         probabilistic=cfg.MODEL.PROBABILISTIC,
+        anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS
     )
     if device is not None:
         model.to(device)
