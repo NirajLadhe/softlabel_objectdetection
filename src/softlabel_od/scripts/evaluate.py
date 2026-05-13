@@ -122,17 +122,15 @@ def evaluate(args):
     print("=" * 70)
 
 
-label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json")
-
 def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained detection model")
-    parser.add_argument("--config", type=str, default=os.path.join(PROJECT_ROOT, "configs/1d_softlabel_config_albers.yaml"), required=True)
-    parser.add_argument("--eval-tag", type=str, default="1D_Gaussian_softlabels_iou0_5", required=True)
+    parser.add_argument("--config", type=str, default=None, help="Model initialization config file (.yaml)")
+    parser.add_argument("--eval-tag", type=str, default=None, help="Evaluation tag for the results")
     parser.add_argument("--metric-type", type=str, default="default", choices=["default", "tide", "pdq", "lrp", "all"], help="Which evaluation metric group to run.")
     parser.add_argument("--weights", type=str, required=True, help="Path to model weights (.pth)")
-    parser.add_argument("--gmm-type", type=str, default="1D", required=True, choices=["1D", "HARD_LABEL"])
+    parser.add_argument("--gmm-type", type=str, default="1D", choices=["1D", "HARD_LABEL"])
     parser.add_argument("--dataset", type=str, default="vindrcxr", help="Registered dataset adapter name")
-    parser.add_argument("--label-file", type=str, default=label_file)
+    parser.add_argument("--label-file", type=str, default=None, help="Path to label file (.json)")
     parser.add_argument("--data-root", type=str, default="/media/klee_ro/public_datasets/vindr_cxr")
     parser.add_argument("--output", type=str, default=os.path.join(PROJECT_ROOT, "outputs/vindrcxr/evaluation_results"))
     parser.add_argument("--batch-size", type=int, default=4)
@@ -145,10 +143,15 @@ def main():
     
     if args.label_file is None:
         if args.gmm_type == "1D":
-            args.label_file = label_file
+            args.label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json")
         else:
             raise ValueError(f"No label file provided for gmm type: {args.gmm_type}")
         print(f"Auto-selected label file: {args.label_file}")
+    if args.config is None:
+        args.config = os.path.join(PROJECT_ROOT, "configs/vindrcxr_1d_softlabel_config_albers.yaml")
+    if args.eval_tag is None:
+        args.eval_tag = "1D_Gaussian_softlabels_iou0_5"
+    
 
     evaluate(args)
 

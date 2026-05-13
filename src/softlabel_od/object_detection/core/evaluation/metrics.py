@@ -116,7 +116,6 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
     Returns:
         dict with mAP metrics
     """
-    # Collect all predictions and GTs per class
     all_classes = set()
     for gt in ground_truths:
         all_classes.update(gt['labels'].tolist())
@@ -125,12 +124,10 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
     
     for iou_thresh in iou_thresholds:
         for cls in all_classes:
-            # Collect class-specific predictions and GTs
             cls_preds = []
             cls_gts = []
             
             for img_idx, (pred, gt) in enumerate(zip(predictions, ground_truths)):
-                # Predictions for this class
                 pred_mask = pred['labels'] == cls
                 if pred_mask.sum() > 0:
                     for box, score in zip(pred['boxes'][pred_mask], pred['scores'][pred_mask]):
@@ -140,7 +137,6 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
                             'score': score
                         })
                 
-                # Ground truths for this class
                 gt_mask = gt['labels'] == cls
                 for box in gt['boxes'][gt_mask]:
                     cls_gts.append({
@@ -153,15 +149,12 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
                 ap_per_class[cls].append(0.0)
                 continue
             
-            # Sort predictions by score
             cls_preds = sorted(cls_preds, key=lambda x: x['score'], reverse=True)
             
-            # Match predictions to GTs
             tp = []
             fp = []
             
             for pred in cls_preds:
-                # Find GTs in the same image
                 img_gts = [g for g in cls_gts if g['image_id'] == pred['image_id'] and not g['matched']]
                 
                 if len(img_gts) == 0:
@@ -169,7 +162,6 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
                     tp.append(0)
                     continue
                 
-                # Find best matching GT
                 ious = [compute_iou_batch(pred['box'][None], g['box'][None])[0] 
                        for g in img_gts]
                 best_iou_idx = np.argmax(ious)
@@ -183,21 +175,23 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
                     tp.append(0)
                     fp.append(1)
             
-            # Compute precision-recall curve
+            # === CHANGED: interpolated PR curve, anchored at (0,1) ===
             tp_cumsum = np.cumsum(tp)
             fp_cumsum = np.cumsum(fp)
-            
-            recalls = tp_cumsum / len(cls_gts)
-            precisions = tp_cumsum / (tp_cumsum + fp_cumsum)
-            
-            # Compute AP (area under PR curve)
-            ap = 0.0
-            for i in range(len(recalls) - 1):
-                ap += (recalls[i+1] - recalls[i]) * precisions[i+1]
-            
+
+            recalls    = np.concatenate([[0.0], tp_cumsum / len(cls_gts)])
+            precisions = np.concatenate([[1.0], tp_cumsum / (tp_cumsum + fp_cumsum)])
+
+            # Precision envelope: replace each point with max precision to its right
+            for i in range(len(precisions) - 2, -1, -1):
+                precisions[i] = max(precisions[i], precisions[i + 1])
+
+            # Area under the enveloped curve
+            ap = float(np.sum((recalls[1:] - recalls[:-1]) * precisions[1:]))
+            # === END CHANGE ===
+
             ap_per_class[cls].append(ap)
     
-    # Compute mean AP across classes
     results = {}
     for i, thresh in enumerate(iou_thresholds):
         aps = [ap_per_class[cls][i] for cls in all_classes]
