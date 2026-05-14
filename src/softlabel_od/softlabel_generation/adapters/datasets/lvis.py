@@ -56,9 +56,9 @@ class LVISAdapter(DatasetPreprocessingAdapter):
     @property
     def no_finding_id(self) -> Optional[int]:
         """
-        Use -1 as a sentinel value because LVIS has no no-finding category.
+        Use null as a sentinel value because LVIS has no no-finding category.
         """
-        return -1
+        return None
 
     @property
     def image_file_extension(self) -> str:
@@ -76,7 +76,7 @@ class LVISAdapter(DatasetPreprocessingAdapter):
         LVIS-style multi-rater annotations can support absent-rater logic
         if rater information is available.
         """
-        return True
+        return False
 
     def _parse_bbox(self, bbox):
         """
