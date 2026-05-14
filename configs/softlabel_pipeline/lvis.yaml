@@ -1,12 +1,12 @@
 DATASET:
   name: "lvis"
   no_finding_labels: []
-  no_finding_id: -1
+  no_finding_id: null
   image_file_extension: ".dicom"
   annotator_id_col: "rad_id"
   image_id_col: "image_id"
   class_name_col: "class_name"
-  absent_rater_vote: true
+  absent_rater_vote: false
   image_id_key: "file_name"
 
 PIPELINE:
@@ -18,7 +18,7 @@ PIPELINE:
   iou_reliability: 0.5
   prior_alpha: 1.0
   min_samples: 5
-  semantic_map: "lvis"
+  semantic_map: null
   reliability_backend: "kalos"
   reliability_method: "ahc"
 
