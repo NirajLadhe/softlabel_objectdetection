@@ -24,5 +24,4 @@ register_adapter("multiorg", MultiOrgAdapter)
 
 from softlabel_od.softlabel_generation.adapters.datasets.lvis import LVISAdapter
 register_adapter("lvis", LVISAdapter)
-register_adapter("coco-lvis", LVISAdapter)       # alias
-register_adapter("coco_lvis", LVISAdapter)       # alias
+register_adapter("null", NullAdapter)
