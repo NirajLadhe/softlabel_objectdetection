@@ -86,39 +86,46 @@ def build_datasets(cfg):
 
 def build_train_sampler(cfg, train_dataset):
     """
-    Reproduce the exact sampler decision tree from legacy train.py.
-
-    Returns (sampler, shuffle, dataset_or_subset).
-
-    The returned dataset_or_subset may differ from train_dataset only when
-    IGNORE_NOFINDING=True and BALANCED_SAMPLER=False.  In that case a
-    SubsetRandomSampler is returned and shuffle must be False.
-
-    Note on the two different NOFINDING config keys:
-        DATA.BALANCED_SAMPLER=True  →  DATA.NOFINDING_WEIGHT_GIVEN controls
-                                       downweighting inside create_balanced_sampler
-        DATA.BALANCED_SAMPLER=False →  DATA.IGNORE_NOFINDING controls whether
-                                       pure No-Finding images are dropped entirely
+    Build training sampler with unified no-finding handling.
+    
+    Two independent flags:
+        IGNORE_NOFINDING_IMAGES: Skip images with only no-finding clusters (healthy CXR)
+        DOWNWEIGHT_NOFINDING_IMAGES: Downweight pure no-finding images in balanced sampler
+    
+    Returns (sampler, shuffle).
     """
+    # Step 1: Filter out pure no-finding images if requested
+    # This applies BEFORE sampler creation, so balanced sampler works on pathology images only
+    dataset_to_sample = train_dataset
+    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
+        print("Filtering pure No-Finding images (healthy CXR) from training set...")
+        valid_indices = [
+            idx for idx in range(len(train_dataset))
+            if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx])
+        ]
+        kept = len(valid_indices)
+        total = len(train_dataset)
+        print(f"  Kept {kept}/{total} images ({kept/total*100:.1f}% have pathology).")
+        
+        # Create filtered dataset for sampler to work on
+        from torch.utils.data import Subset
+        dataset_to_sample = Subset(train_dataset, valid_indices)
+    
+    # Step 2: Create sampler
     if cfg.DATA.BALANCED_SAMPLER:
         print("Using balanced (RFS) sampling...")
         sampler = create_balanced_sampler(
-            train_dataset,
+            dataset_to_sample,
             rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
-            ignore_nofinding=cfg.DATA.NOFINDING_WEIGHT_GIVEN,
+            downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
         )
         return sampler, False
     else:
-        if cfg.DATA.IGNORE_NOFINDING:
-            print("Filtering No-Finding images from training set...")
-            valid_indices = [
-                idx for idx in range(len(train_dataset))
-                if train_dataset.get_dominant_class(
-                    image_id=train_dataset.image_ids[idx]
-                ) != 0
-            ]
-            print(f"  Kept {len(valid_indices)}/{len(train_dataset)} images.")
-            sampler = torch.utils.data.SubsetRandomSampler(valid_indices)
+        # No balanced sampler, use filtered indices directly if filtering was applied
+        if cfg.DATA.IGNORE_NOFINDING_IMAGES:
+            # Return SubsetRandomSampler over filtered indices
+            from torch.utils.data import SubsetRandomSampler
+            sampler = SubsetRandomSampler(valid_indices)
             return sampler, False
         else:
             return None, True
@@ -192,18 +199,31 @@ def build_dataloaders(cfg, train_dataset, val_dataset):
 def build_overfit_subset(cfg, train_dataset):
     """
     Return a fixed Subset of train_dataset for overfit runs.
-
     Lightning uses this instead of OverfitDataLoader because the trainer
     drives the loop; there is no place to wrap the loader.  The subset is
     drawn deterministically via create_balanced_sampler with a fixed seed.
     The resulting Subset is used with a plain shuffle=False DataLoader.
+    
+    Honors IGNORE_NOFINDING_IMAGES to exclude healthy CXR from overfit batches.
     """
     from torch.utils.data import Subset
+    
+    # Filter out pure no-finding images if requested
+    dataset_to_sample = train_dataset
+    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
+        print("[Overfit] Filtering pure No-Finding images...")
+        valid_indices = [
+            idx for idx in range(len(train_dataset))
+            if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx])
+        ]
+        dataset_to_sample = Subset(train_dataset, valid_indices)
+        print(f"[Overfit] Working with {len(valid_indices)}/{len(train_dataset)} pathology images.")
+    
     num_needed = int(cfg.TRAIN.OVERFIT_BATCHES) * int(cfg.TRAIN.BATCH_SIZE)
     sampler = create_balanced_sampler(
-        train_dataset,
+        dataset_to_sample,
         rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
-        ignore_nofinding=cfg.DATA.NOFINDING_WEIGHT_GIVEN,
+        downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
     )
     g = torch.Generator()
     g.manual_seed(42)
@@ -213,6 +233,11 @@ def build_overfit_subset(cfg, train_dataset):
         pass
     it = iter(sampler)
     fixed_indices = [int(next(it)) for _ in range(num_needed)]
+    
+    # Map back to original dataset indices if we used a Subset
+    if isinstance(dataset_to_sample, Subset):
+        fixed_indices = [dataset_to_sample.indices[i] for i in fixed_indices]
+    
     subset = Subset(train_dataset, fixed_indices)
     print(
         f"[Overfit] Fixed balanced subset: {len(subset)} samples "

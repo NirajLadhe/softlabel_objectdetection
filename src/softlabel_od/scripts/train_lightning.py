@@ -11,6 +11,7 @@ import os
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.strategies import DDPStrategy
 
 from softlabel_od.object_detection.utils.config import get_cfg_from_file, resolve_label_mode
 from softlabel_od.object_detection.core.lightning.lightning_datamodule import (
@@ -116,6 +117,7 @@ def main():
         accumulate_grad_batches=cfg.LIGHTNING.ACCUMULATE_GRAD_BATCHES,
         logger=tb_logger,
         callbacks=callbacks,
+        strategy=DDPStrategy(find_unused_parameters=True),
         enable_checkpointing=cfg.LIGHTNING.ENABLE_CHECKPOINTING,    
         enable_progress_bar=cfg.LIGHTNING.ENABLE_PROGRESS_BAR,
         deterministic=cfg.LIGHTNING.DETERMINISTIC,
