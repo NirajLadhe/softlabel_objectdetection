@@ -30,3 +30,4 @@ from softlabel_od.object_detection.core.evaluation.metrics import (
 )
 from softlabel_od.object_detection.core.evaluation.pdq import compute_pdq, evaluate_pdq
 from softlabel_od.object_detection.core.evaluation.tide import evaluate_tide
+from softlabel_od.object_detection.core.evaluation.lrp import evaluate_lrp
