@@ -242,32 +242,11 @@ def compute_expected_iou(predictions, ground_truths, num_samples=100, iou_thresh
             std_delta = pred_stds_delta[pred_idx]  # delta space [std_dx, std_dy, std_dw, std_dh]
             gt_box = gt_boxes[gt_idx]
             
-            # --- Convert delta-space stds to pixel-space stds ---
-            # Approximate using the predicted box dimensions
-            pred_w = max(pred_mean[2] - pred_mean[0], 1.0)
-            pred_h = max(pred_mean[3] - pred_mean[1], 1.0)
-            
-            # Delta-to-pixel conversion:
-            #   dx = (cx - prop_cx) / prop_w  →  sigma_cx ≈ std_dx * pred_w
-            #   dy = (cy - prop_cy) / prop_h  →  sigma_cy ≈ std_dy * pred_h
-            #   dw = log(w / prop_w)           →  sigma_w  ≈ std_dw * pred_w
-            #   dh = log(h / prop_h)           →  sigma_h  ≈ std_dh * pred_h
-            sigma_cx = std_delta[0] * pred_w
-            sigma_cy = std_delta[1] * pred_h
-            sigma_w  = std_delta[2] * pred_w
-            sigma_h  = std_delta[3] * pred_h
-            
-            # Convert center-format stds to corner-format [x1, y1, x2, y2]
-            # x1 = cx - w/2  →  std(x1) = sqrt(std(cx)^2 + (std(w)/2)^2)
-            # y1 = cy - h/2  →  std(y1) = sqrt(std(cy)^2 + (std(h)/2)^2)
-            # x2 = cx + w/2  →  std(x2) = same as std(x1) by symmetry
-            # y2 = cy + h/2  →  std(y2) = same as std(y1)
-            pixel_std = np.array([
-                np.sqrt(sigma_cx**2 + 0.25 * sigma_w**2),  # std_x1
-                np.sqrt(sigma_cy**2 + 0.25 * sigma_h**2),  # std_y1
-                np.sqrt(sigma_cx**2 + 0.25 * sigma_w**2),  # std_x2
-                np.sqrt(sigma_cy**2 + 0.25 * sigma_h**2),  # std_y2
-            ])
+            # Convert delta-space stds to pixel-space using the shared utility
+            pixel_std = delta_stds_to_pixel_stds(
+                pred_mean[None],          # expects (N,4) array
+                std_delta[None],          # expects (N,4) array
+            )[0]  # back to (4,)
             
             # Sample boxes from the Gaussian and compute IoU with matched GT
             sampled_boxes = np.random.normal(
@@ -283,6 +262,62 @@ def compute_expected_iou(predictions, ground_truths, num_samples=100, iou_thresh
             expected_ious.append(np.mean(ious))
     
     return np.mean(expected_ious) if len(expected_ious) > 0 else 0.0
+
+
+def delta_stds_to_pixel_stds(
+    pred_boxes: np.ndarray,
+    pred_stds,
+    fallback_std: float = 10.0,
+) -> np.ndarray:
+    """Convert delta-space bbox std-deviations → pixel-space stds for [x1, y1, x2, y2].
+
+    Shared by compute_expected_iou (metrics.py) and PDQ (pdq.py) so that the
+    conversion is uniform across all evaluation metrics.
+
+    The model outputs bbox regression deltas (dx, dy, dw, dh). The stds are in
+    that same delta space. We approximate the conversion using the predicted box:
+
+        sigma_cx ≈ std_dx * box_width
+        sigma_cy ≈ std_dy * box_height
+        sigma_w  ≈ std_dw * box_width
+        sigma_h  ≈ std_dh * box_height
+
+    Then from (cx, cy, w, h) to corner format (x1, y1, x2, y2):
+        std(x1) = std(x2) = sqrt(sigma_cx^2 + (sigma_w/2)^2)
+        std(y1) = std(y2) = sqrt(sigma_cy^2 + (sigma_h/2)^2)
+
+    Args:
+        pred_boxes:   (N, 4) array of predicted boxes in pixel space [x1, y1, x2, y2].
+        pred_stds:    (N, 4) array of bbox stds in delta space, or None.
+        fallback_std: Pixel-space std to use when pred_stds is None.
+                      Prefer a prior-derived value over an arbitrary constant.
+
+    Returns:
+        (N, 4) array of pixel-space stds [std_x1, std_y1, std_x2, std_y2].
+    """
+    N = len(pred_boxes)
+
+    if pred_stds is None or len(pred_stds) == 0:
+        return np.full((N, 4), fallback_std)
+
+    pred_stds = np.array(pred_stds)
+    pixel_stds = np.zeros((N, 4))
+
+    for i, (box, std_d) in enumerate(zip(pred_boxes, pred_stds)):
+        pred_w = max(box[2] - box[0], 1.0)
+        pred_h = max(box[3] - box[1], 1.0)
+
+        sigma_cx = std_d[0] * pred_w
+        sigma_cy = std_d[1] * pred_h
+        sigma_w  = std_d[2] * pred_w
+        sigma_h  = std_d[3] * pred_h
+
+        std_x = np.sqrt(sigma_cx**2 + 0.25 * sigma_w**2)
+        std_y = np.sqrt(sigma_cy**2 + 0.25 * sigma_h**2)
+
+        pixel_stds[i] = [std_x, std_y, std_x, std_y]
+
+    return pixel_stds
 
 
 def compute_calibration_error(predictions, ground_truths, num_bins=10):
@@ -611,21 +646,11 @@ def compute_bbox_uncertainty_calibration(predictions, ground_truths, iou_thresho
             gt_box   = gt_boxes[gt_idx]           # pixels [x1,y1,x2,y2]
             std_delta = pred_stds[pred_idx]       # delta space [std_dx, std_dy, std_dw, std_dh]
 
-            # Convert delta-space stds to pixel-space (same logic as compute_expected_iou)
-            pred_w = max(pred_box[2] - pred_box[0], 1.0)
-            pred_h = max(pred_box[3] - pred_box[1], 1.0)
-
-            sigma_cx = std_delta[0] * pred_w
-            sigma_cy = std_delta[1] * pred_h
-            sigma_w  = std_delta[2] * pred_w
-            sigma_h  = std_delta[3] * pred_h
-
-            pixel_std = np.array([
-                np.sqrt(sigma_cx**2 + 0.25 * sigma_w**2),  # std_x1
-                np.sqrt(sigma_cy**2 + 0.25 * sigma_h**2),  # std_y1
-                np.sqrt(sigma_cx**2 + 0.25 * sigma_w**2),  # std_x2
-                np.sqrt(sigma_cy**2 + 0.25 * sigma_h**2),  # std_y2
-            ])
+            # Convert delta-space stds to pixel-space using the shared utility
+            pixel_std = delta_stds_to_pixel_stds(
+                pred_box[None],           # expects (N,4) array
+                std_delta[None],          # expects (N,4) array
+            )[0]  # back to (4,)
 
             actual_error = np.abs(pred_box - gt_box)        # pixels, per coordinate
 

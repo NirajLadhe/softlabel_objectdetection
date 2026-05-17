@@ -1,0 +1,27 @@
+DATASET:
+  name: "texbig"
+  no_finding_labels: []          # TexBig has no background/no-finding class
+  no_finding_id: null            # No background class ID
+  image_file_extension: ".png"
+  annotator_id_col: "rater_id"
+  image_id_col: "image_id"
+  class_name_col: "class_name"
+  absent_rater_vote: false       
+
+PIPELINE:
+  gmm_mode: "1d"
+  clustering_method: "iou"
+  iou_threshold: 0.5
+  iomin_threshold: 0.5
+  center_ratio_threshold: 0.5
+  iou_reliability: 0.5
+  prior_alpha: 1.0
+  min_samples: 2                 # Min images required per class to calculate priors
+  semantic_map: "none"           # No class-semantic remapping for TexBig
+  reliability_backend: "kalos"
+  reliability_method: "shm"
+
+PATHS:
+  input_csv: "outputs/texbig/train_enriched.csv"
+  output_dir: "outputs/texbig"
+  reliability_dir: "outputs/raters_reliability/annotator_reliability_texbig"
