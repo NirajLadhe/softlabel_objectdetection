@@ -17,11 +17,11 @@ from softlabel_od.softlabel_generation.adapters.datasets.vindrcxr import VinDrCX
 from softlabel_od.softlabel_generation.adapters.datasets.null_adapter import NullAdapter
 from softlabel_od.softlabel_generation.adapters.datasets.texbig import TexBigAdapter
 from softlabel_od.softlabel_generation.adapters.datasets.multiorg import MultiOrgAdapter
+from softlabel_od.softlabel_generation.adapters.datasets.lvis import LVISAdapter
 
 register_adapter("vindrcxr", VinDrCXRAdapter)
 register_adapter("vindr-cxr", VinDrCXRAdapter)   # alias
 register_adapter("null", NullAdapter)
 register_adapter("texbig", TexBigAdapter)
 register_adapter("multiorg", MultiOrgAdapter)
-from softlabel_od.softlabel_generation.adapters.datasets.lvis import LVISAdapter
 register_adapter("lvis", LVISAdapter)
