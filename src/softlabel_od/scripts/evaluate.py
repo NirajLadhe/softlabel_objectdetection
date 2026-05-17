@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from softlabel_od.object_detection.adapters.datasets import get_dataset_class
-from softlabel_od.object_detection.core.evaluation import evaluate_default_metrics, evaluate_tide, evaluate_pdq
+from softlabel_od.object_detection.core.evaluation import evaluate_default_metrics, evaluate_tide, evaluate_pdq, evaluate_lrp
 from softlabel_od.object_detection.core.evaluation.runner import load_model, collect_predictions
 from softlabel_od.object_detection.utils.training_helpers import collate_fn
 from softlabel_od.object_detection.utils.transforms import Compose, ToTensor
@@ -24,7 +24,7 @@ METRIC_RUNNERS = {
     "default": evaluate_default_metrics,
     "tide": evaluate_tide,
     "pdq": evaluate_pdq,
-    # "lrp": evaluate_lrp,
+    "lrp": evaluate_lrp,
 }
 
 
