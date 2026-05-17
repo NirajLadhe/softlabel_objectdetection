@@ -23,3 +23,5 @@ register_adapter("vindr-cxr", VinDrCXRAdapter)   # alias
 register_adapter("null", NullAdapter)
 register_adapter("texbig", TexBigAdapter)
 register_adapter("multiorg", MultiOrgAdapter)
+from softlabel_od.softlabel_generation.adapters.datasets.lvis import LVISAdapter
+register_adapter("lvis", LVISAdapter)
