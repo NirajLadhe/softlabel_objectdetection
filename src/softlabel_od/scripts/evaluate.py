@@ -48,6 +48,19 @@ def evaluate(args):
         label_mode=label_mode,
     )
 
+    # Filter out pure no-finding images if configured
+    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
+        print("Filtering pure No-Finding images (healthy CXR) from validation set...")
+        valid_indices = [
+            idx for idx in range(len(val_dataset))
+            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx])
+        ]
+        kept = len(valid_indices)
+        total = len(val_dataset)
+        print(f"  Kept {kept}/{total} images ({kept/total*100:.1f}% have pathology).")
+        from torch.utils.data import Subset
+        val_dataset = Subset(val_dataset, valid_indices)
+
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=args.batch_size,
@@ -57,8 +70,12 @@ def evaluate(args):
     )
     print(f"Validation set: {len(val_dataset)} images")
 
-    # class_names comes from the dataset adapter — no hard-coded mapping needed
-    class_names = val_dataset.class_names
+    # Handle class_names for both original dataset and Subset wrapper
+    if hasattr(val_dataset, 'class_names'):
+        class_names = val_dataset.class_names
+    else:
+        # Subset wrapper - access underlying dataset
+        class_names = val_dataset.dataset.class_names
 
     print(f"\nLoading model from: {args.weights}")
     model = load_model(weights_path=args.weights, 

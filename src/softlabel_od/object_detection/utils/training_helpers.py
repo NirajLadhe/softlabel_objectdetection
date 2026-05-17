@@ -72,7 +72,7 @@ def summarize_balanced_sampler(
     weights,
     rfs_threshold,
     presence_prob_thresh,
-    ignore_nofinding,
+    downweight_nofinding,
     nofinding_weight,
 ):
     """
@@ -92,7 +92,7 @@ def summarize_balanced_sampler(
     print(f"  label_mode: {getattr(dataset, 'label_mode', 'unknown')}")
     print(f"  presence_prob_thresh: {presence_prob_thresh}")
     print(f"  rfs_threshold: {rfs_threshold}")
-    print(f"  ignore_nofinding: {ignore_nofinding}")
+    print(f"  downweight_nofinding: {downweight_nofinding}")
     print(f"  nofinding_weight: {nofinding_weight}")
 
     num_pure_nofinding = sum(1 for present in img_present if not present)
@@ -138,9 +138,10 @@ def create_balanced_sampler(
     rfs_threshold=0.01,
     oversample_factor=None,
     presence_prob_thresh=0.1,
-    ignore_nofinding=False,
+    downweight_nofinding=False,
     alpha=0.5,
     nofinding_weight=0.1,
+    indices=None,  # NEW: optional list of indices to limit sampling
 ):
     """
     Repeat Factor Sampling (RFS) for long-tailed detection datasets.
@@ -149,7 +150,7 @@ def create_balanced_sampler(
         dataset:              Any DetectionDatasetPort-compatible dataset.
         rfs_threshold:        Frequency threshold t (typical: 0.001–0.01).
         presence_prob_thresh: Soft-label disease presence threshold.
-        ignore_nofinding:     Give pure No-Finding images a low weight.
+        downweight_nofinding: Give pure No-Finding images a low weight.
         alpha:                Exponent for repeat factor (0.5 = sqrt).
         nofinding_weight:     Weight assigned to No-Finding images when
                               ignore_nofinding=True.
@@ -161,6 +162,9 @@ def create_balanced_sampler(
         rfs_threshold = oversample_factor
 
     img_ids = dataset.get_image_ids()
+    # If indices provided, limit to those
+    if indices is not None:
+        img_ids = [img_ids[i] for i in indices]
     N = len(img_ids)
 
     img_present = []
@@ -181,7 +185,7 @@ def create_balanced_sampler(
     weights = []
     for present in img_present:
         if not present:
-            w = nofinding_weight if ignore_nofinding else 1.0
+            w = nofinding_weight if downweight_nofinding else 1.0
         else:
             w = max(r_c[c] for c in present)
         weights.append(w)
@@ -195,7 +199,7 @@ def create_balanced_sampler(
         weights=weights,
         rfs_threshold=rfs_threshold,
         presence_prob_thresh=presence_prob_thresh,
-        ignore_nofinding=ignore_nofinding,
+        downweight_nofinding=downweight_nofinding,
         nofinding_weight=nofinding_weight,
     )
     return WeightedRandomSampler(

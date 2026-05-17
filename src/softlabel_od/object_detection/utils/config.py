@@ -24,8 +24,8 @@ def get_cfg_defaults():
     _C.DATA.TEST_SPLIT_RATIO = 0.2
     _C.DATA.BALANCED_SAMPLER = True
     _C.DATA.OVERSAMPLE_FACTOR = 1.0
-    _C.DATA.IGNORE_NOFINDING = False
-    _C.DATA.NOFINDING_WEIGHT_GIVEN = False
+    _C.DATA.IGNORE_NOFINDING_IMAGES = False  # Skip images with only no-finding clusters
+    _C.DATA.DOWNWEIGHT_NOFINDING_IMAGES = False  # Downweight pure no-finding in balanced sampler
     _C.DATA.OPTIONS = CN(new_allowed=True)
     # Model settings
     _C.MODEL = CN()

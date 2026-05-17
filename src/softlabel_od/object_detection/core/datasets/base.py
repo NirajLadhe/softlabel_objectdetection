@@ -316,6 +316,23 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                 best_prob = float(prob)
                 best_class = cls
         return best_class
+    
+    def has_pathology_clusters(self, image_id: str) -> bool:
+        """
+        Check if image has any pathology clusters (not just no-finding/background).
+        
+        Returns True if at least one cluster has a disease class as dominant,
+        False if all clusters are no-finding (healthy CXR).
+        """
+        labels = self.get_records_for_image(image_id)
+        for label in labels:
+            # Skip placeholder records
+            if self.record_is_placeholder(label):
+                continue
+            # Check if this cluster has a pathology (non-background) dominant class
+            if self.get_cluster_dominant_overall(label) != 0:
+                return True
+        return False
 
     def get_cluster_dominant_disease(self, cluster_label: Dict[str, Any]) -> int | None:
         probs = (cluster_label or {}).get("class_probs", {}) or {}
