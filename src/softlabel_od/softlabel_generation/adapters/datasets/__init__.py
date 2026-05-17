@@ -15,6 +15,7 @@ Adding a new dataset
 from softlabel_od.softlabel_generation.adapters.datasets.registry import register_adapter
 from softlabel_od.softlabel_generation.adapters.datasets.vindrcxr import VinDrCXRAdapter
 from softlabel_od.softlabel_generation.adapters.datasets.null_adapter import NullAdapter
+from softlabel_od.softlabel_generation.adapters.datasets.texbig import TexBigAdapter
 from softlabel_od.softlabel_generation.adapters.datasets.multiorg import MultiOrgAdapter
 
 register_adapter("vindrcxr", VinDrCXRAdapter)
