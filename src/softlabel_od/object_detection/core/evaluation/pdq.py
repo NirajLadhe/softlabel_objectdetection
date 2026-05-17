@@ -42,12 +42,95 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from typing import List, Dict, Any
+from scipy.special import erf as scipy_erf
+from typing import List, Dict, Any, Optional, Tuple
+import os
+import json
+import glob
+from tqdm import tqdm
+import warnings
+
 
 from softlabel_od.object_detection.core.evaluation.metrics import delta_stds_to_pixel_stds
 
 # Numerical stability constant — prevents log(0) = -inf
 _SMALL_VAL = 1e-14
+
+def _median_image_hw(ground_truths: List[Dict[str, Any]]) -> Tuple[float, float]:
+    hs, ws = [], []
+    for gt in ground_truths:
+        sz = gt.get("image_size")
+        if sz and len(sz) == 2:
+            h, w = float(sz[0]), float(sz[1])
+            if h > 0 and w > 0:
+                hs.append(h)
+                ws.append(w)
+    if not hs:
+        return 1024.0, 1024.0
+    return float(np.median(hs)), float(np.median(ws))
+
+
+def _resolve_class_priors_json(
+    label_file: Optional[str],
+    priors_file: Optional[str],
+) -> Optional[str]:
+    if priors_file:
+        path = os.path.abspath(priors_file)
+        return path if os.path.isfile(path) else None
+    if not label_file:
+        return None
+    label_dir = os.path.dirname(os.path.abspath(label_file))
+    priors_dir = os.path.join(label_dir, "priors")
+    if not os.path.isdir(priors_dir):
+        return None
+    candidates = sorted(glob.glob(os.path.join(priors_dir, "class_priors*.json")))
+    return candidates[0] if candidates else None
+
+
+def _pixel_corner_std_from_prior_block(
+    block: Dict[str, Any],
+    ref_h: float,
+    ref_w: float,
+) -> float:
+    x_var = float(block["x_var"])
+    y_var = float(block["y_var"])
+    w_var = float(block["w_var"])
+    h_var = float(block["h_var"])
+    sigma_cx = np.sqrt(x_var) * ref_w
+    sigma_cy = np.sqrt(y_var) * ref_h
+    sigma_w = np.sqrt(w_var) * ref_w
+    sigma_h = np.sqrt(h_var) * ref_h
+    std_x = float(np.sqrt(sigma_cx**2 + 0.25 * sigma_w**2))
+    std_y = float(np.sqrt(sigma_cy**2 + 0.25 * sigma_h**2))
+    return (std_x + std_y) / 2.0
+
+
+def _load_bbox_std_fallback_from_class_priors(
+    path: str,
+    ref_h: float,
+    ref_w: float,
+) -> Optional[float]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if "global_prior" in data and isinstance(data["global_prior"], dict):
+        block = data["global_prior"]
+        if all(k in block for k in ("x_var", "y_var", "w_var", "h_var")):
+            return _pixel_corner_std_from_prior_block(block, ref_h, ref_w)
+
+    cp = data.get("class_priors")
+    if not isinstance(cp, dict):
+        return None
+    values = []
+    for block in cp.values():
+        if isinstance(block, dict) and all(
+            k in block for k in ("x_var", "y_var", "w_var", "h_var")
+        ):
+            values.append(_pixel_corner_std_from_prior_block(block, ref_h, ref_w))
+    return float(np.mean(values)) if values else None
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +141,8 @@ def compute_pdq(
     predictions: List[Dict[str, Any]],
     ground_truths: List[Dict[str, Any]],
     heatmap_threshold: float = 0.01,
+    bbox_std_fallback: float = 10.0,
+    show_progress: bool = True,
 ) -> Dict[str, float]:
     """
     Compute Probability-based Detection Quality (PDQ) for a dataset.
@@ -84,6 +169,8 @@ def compute_pdq(
         heatmap_threshold: Probability values below this are clipped to zero in the
                            heatmap. This mimics the thresholding in the reference
                            implementation for numerical stability.
+        bbox_std_fallback: Pixel corner std when bbox_stds are missing (see delta_stds_to_pixel_stds).
+        show_progress: tqdm over images when True.
 
     Returns:
         dict with keys:
@@ -104,12 +191,16 @@ def compute_pdq(
     tot_fp = 0
     tot_fn = 0
 
-    for pred, gt in zip(predictions, ground_truths):
+    paired = zip(predictions, ground_truths)
+    if show_progress:
+        paired = tqdm(paired, total=len(predictions), desc="PDQ", unit="img")
+
+    for pred, gt in paired:
         per_img_size = gt.get("image_size")
         if per_img_size is None:
             raise ValueError("PDQ requires gt['image_size'] to dynamically generate spatial heatmaps.")
             
-        img_results = _evaluate_image(pred, gt, per_img_size, heatmap_threshold)
+        img_results = _evaluate_image(pred, gt, per_img_size, heatmap_threshold, bbox_std_fallback=bbox_std_fallback)
         tot_overall_quality += img_results["overall"]
         tot_spatial_quality += img_results["spatial"]
         tot_label_quality   += img_results["label"]
@@ -142,6 +233,7 @@ def _evaluate_image(
     gt: Dict[str, Any],
     img_size: tuple,
     heatmap_threshold: float,
+    bbox_std_fallback: float = 10.0,
 ) -> Dict[str, Any]:
     """
     Run PDQ evaluation for a single image.
@@ -172,7 +264,7 @@ def _evaluate_image(
         }
 
     # Convert predicted bbox stds from delta-space to pixel-space
-    pixel_stds = delta_stds_to_pixel_stds(pred_boxes, pred_stds)
+    pixel_stds = delta_stds_to_pixel_stds(pred_boxes, pred_stds, fallback_std=bbox_std_fallback)
 
     # Build Gaussian heatmaps: shape (H, W, D)
     H, W = img_size
@@ -190,7 +282,7 @@ def _evaluate_image(
     except ValueError as e:
         # class_probs missing → do not corrupt PDQ with a wrong proxy.
         # Count all detections as FP and all GTs as FN, then skip.
-        import warnings
+
         warnings.warn(f"[PDQ] Skipping image: {e}")
         return {
             "overall": 0.0, "spatial": 0.0, "label": 0.0,
@@ -320,7 +412,7 @@ def _build_gaussian_heatmaps(
     Returns:
         heatmaps: (H, W, D) float32 array, values in [0, 1]
     """
-    from scipy.special import erf as scipy_erf
+
 
     D = len(pred_boxes)
     heatmaps = np.zeros((H, W, D), dtype=np.float32)
@@ -501,6 +593,8 @@ def evaluate_pdq(
     gmm_type="1D",
     probabilistic=False,
     output_dir=None,
+    label_file=None,
+    priors_file=None,
     **kwargs,
 ):
     """Run PDQ evaluation and return JSON-serializable results.
@@ -512,39 +606,38 @@ def evaluate_pdq(
     automatically from the softlabel priors JSON in output_dir, rather than
     using a hardcoded value with no scientific justification.
     """
-    # --- Load prior-derived fallback std from the pipeline's priors file ---
-    # The soft-label generation pipeline writes a *_with_priors.json that
-    # contains per-class GMM statistics. We use the mean spatial std across all
-    # classes as a principled fallback rather than an arbitrary constant.
+    ref_h, ref_w = _median_image_hw(ground_truths)
+    priors_path = _resolve_class_priors_json(label_file, priors_file)
     fallback_std = None
-    if output_dir is not None:
-        import os, glob, json
-        prior_files = glob.glob(os.path.join(output_dir, "**", "*_with_priors.json"), recursive=True)
-        if prior_files:
-            try:
-                with open(prior_files[0]) as f:
-                    priors = json.load(f)
-                # Extract all per-class std values and take the mean
-                stds = []
-                for entry in priors.values():
-                    if isinstance(entry, dict):
-                        for comp in entry.get("components", []):
-                            if "std" in comp:
-                                stds.append(comp["std"])
-                if stds:
-                    fallback_std = float(np.mean(stds))
-                    print(f"  [PDQ] Using prior-derived fallback std: {fallback_std:.2f} px")
-            except Exception as e:
-                print(f"  [PDQ] Could not read priors file ({e}). Deriving fallback from data.")
-
+    if priors_path:
+        fallback_std = _load_bbox_std_fallback_from_class_priors(priors_path, ref_h, ref_w)
+        if fallback_std is not None:
+            print(
+                f"  [PDQ] Bbox std fallback from priors: {fallback_std:.2f} px "
+                f"({priors_path}; used when bbox_stds missing)"
+            )
+        else:
+            print(f"  [PDQ] Could not parse priors file: {priors_path}")
     if fallback_std is None:
-        # Data-driven fallback: mean predicted box size × 0.1 (a small fraction of a typical box)
-        all_sizes = [
-            max(p["boxes"][:, 2] - p["boxes"][:, 0]) if len(p.get("boxes", [])) else 0
-            for p in predictions
-        ]
-        fallback_std = max(float(np.mean([s for s in all_sizes if s > 0]) * 0.1), 5.0)
-        print(f"  [PDQ] No priors file found. Using data-derived fallback std: {fallback_std:.2f} px")
+        all_sizes: List[float] = []
+        for p in predictions:
+            boxes = p.get("boxes", [])
+            if len(boxes) == 0:
+                continue
+            b = np.asarray(boxes, dtype=np.float64)
+            widths = b[:, 2] - b[:, 0]
+            all_sizes.append(float(np.max(widths)))
+        if all_sizes:
+            fallback_std = max(float(np.mean(all_sizes) * 0.1), 5.0)
+            print(
+                f"  [PDQ] No usable class priors; data-derived bbox std fallback: "
+                f"{fallback_std:.2f} px"
+            )
+        else:
+            fallback_std = 10.0
+            print(
+                f"  [PDQ] No priors / boxes; default bbox std fallback: {fallback_std:.2f} px"
+            )
 
     # --- Pre-check 1: PDQ requires a probabilistic model ---
     if gmm_type == "HARD_LABEL" or not probabilistic:
@@ -578,6 +671,8 @@ def evaluate_pdq(
         predictions,
         ground_truths,
         heatmap_threshold=0.01,
+        bbox_std_fallback=fallback_std,
+        show_progress=True,
     )
     print(f"  PDQ Score:        {pdq_results['pdq']:.4f}  (main metric, higher is better)")
     print(f"  Avg Spatial Q:    {pdq_results['avg_spatial_quality']:.4f}  (localization uncertainty quality)")
