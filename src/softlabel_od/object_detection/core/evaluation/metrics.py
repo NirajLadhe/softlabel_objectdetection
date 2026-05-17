@@ -194,9 +194,22 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
     
     results = {}
     for i, thresh in enumerate(iou_thresholds):
-        aps = [ap_per_class[cls][i] for cls in all_classes]
-        results[f'mAP_{int(thresh*100)}'] = np.mean(aps)
+        # Exclude No Finding (class 1) from the standard pathology mAP
+        aps = [ap_per_class[cls][i] for cls in all_classes if cls > 1]
+        if len(aps) > 0:
+            results[f'mAP_{int(thresh*100)}'] = np.mean(aps)
+        else:
+            results[f'mAP_{int(thresh*100)}'] = 0.0
+            
+        # Compute AP for No Finding separately
+        if 1 in ap_per_class:
+            results[f'AP_NoFinding_{int(thresh*100)}'] = ap_per_class[1][i]
     
+    results['mAP'] = np.mean([results[f'mAP_{int(t*100)}'] for t in iou_thresholds])
+    if 1 in ap_per_class:
+        results['AP_NoFinding'] = np.mean([results[f'AP_NoFinding_{int(t*100)}'] for t in iou_thresholds])
+    
+    # Calculate overall mAP only over pathology classes
     results['mAP'] = np.mean([results[f'mAP_{int(t*100)}'] for t in iou_thresholds])
     results['per_class_ap'] = {cls: np.mean(aps) for cls, aps in ap_per_class.items()}
     
@@ -763,6 +776,8 @@ def evaluate_default_metrics(
     map_results = compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75])
     results["mAP"] = {k: float(v) if not isinstance(v, dict) else v for k, v in map_results.items()}
     print(f"  mAP:              {map_results['mAP']:.4f}")
+    if 'AP_NoFinding' in map_results:
+        print(f"  AP_NoFinding:     {map_results['AP_NoFinding']:.4f}")
     print(f"  mAP@40:           {map_results['mAP_40']:.4f}")
     print(f"  mAP@50:           {map_results['mAP_50']:.4f}")
     print(f"  mAP@75:           {map_results['mAP_75']:.4f}")

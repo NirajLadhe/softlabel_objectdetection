@@ -29,7 +29,7 @@ def get_cfg_defaults():
     _C.DATA.OPTIONS = CN(new_allowed=True)
     # Model settings
     _C.MODEL = CN()
-    _C.MODEL.NUM_CLASSES = 15  # 14 pathology classes + 1 background/no finding
+    _C.MODEL.NUM_CLASSES = 16  # 14 pathology classes + 1 background + 1 no finding
     _C.MODEL.BACKBONE = 'resnet50'
     _C.MODEL.PROBABILISTIC = True
     _C.MODEL.ROI_HEAD_BUFFER_FREQ_TERM = 'inverse' # Choose between "inverse", "inverse_sqrt"

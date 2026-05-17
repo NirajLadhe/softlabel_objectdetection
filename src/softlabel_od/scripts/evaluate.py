@@ -151,7 +151,7 @@ def main():
     parser.add_argument("--data-root", type=str, default="/media/klee_ro/public_datasets/vindr_cxr")
     parser.add_argument("--output", type=str, default=os.path.join(PROJECT_ROOT, "outputs/vindrcxr/evaluation_results"))
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--num-classes", type=int, default=15)
+    parser.add_argument("--num-classes", type=int, default=16)
     parser.add_argument("--backbone", type=str, default="resnet50")
     parser.add_argument("--test-split-ratio", type=float, default=0.20)
     parser.add_argument("--cpu", action="store_true")

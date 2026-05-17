@@ -178,6 +178,8 @@ def create_balanced_sampler(
 
     r_c = {}
     for c, cnt in cat_img_count.items():
+        if c <= 1:  # skip background and No Finding
+            continue
         f_c = cnt / max(1, N)
         ratio = rfs_threshold / max(f_c, 1e-12)
         r_c[c] = max(1.0, float(ratio ** alpha))
