@@ -333,6 +333,15 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             if self.get_cluster_dominant_overall(label) != 0:
                 return True
         return False
+    
+    def is_pure_nofinding_image(self, image_id: str) -> bool:
+        """
+        Check if image is pure no-finding (healthy CXR with no pathology clusters).
+        
+        Returns True if ALL clusters are no-finding/background (no disease present),
+        False if any cluster has a pathology.
+        """
+        return not self.has_pathology_clusters(image_id)
 
     def get_cluster_dominant_disease(self, cluster_label: Dict[str, Any]) -> int | None:
         probs = (cluster_label or {}).get("class_probs", {}) or {}

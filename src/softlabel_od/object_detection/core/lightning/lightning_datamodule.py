@@ -86,31 +86,70 @@ class DetectionLightningDataModule(pl.LightningDataModule):
     
     # TRAIN LOADER
     def build_train_loader(self, cfg, train_dataset):
-        # Step 1: Filter out pure no-finding images if requested
-        dataset_to_sample = train_dataset
+        import numpy as np
+        from torch.utils.data import Subset, SubsetRandomSampler
+        
+        # Step 1: Determine which images to include based on no-finding strategy
+        all_indices = list(range(len(train_dataset)))
+        valid_indices = all_indices
+        
+        # Strategy 1: Completely ignore all pure no-finding images
         if cfg.DATA.IGNORE_NOFINDING_IMAGES:
             print("Filtering pure No-Finding images (healthy CXR) from training set...")
             valid_indices = [
-                idx for idx in range(len(train_dataset))
+                idx for idx in all_indices
                 if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx])
             ]
             kept = len(valid_indices)
-            total = len(train_dataset)
+            total = len(all_indices)
             print(f"  Kept {kept}/{total} images ({kept/total*100:.1f}% have pathology).")
-            dataset_to_sample = Subset(train_dataset, valid_indices)
+        
+        # Strategy 2: Include only a fraction of pure no-finding images
+        elif cfg.DATA.NOFINDING_INCLUDE_FRACTION < 1.0:
+            fraction = cfg.DATA.NOFINDING_INCLUDE_FRACTION
+            print(f"Sampling {fraction*100:.1f}% of pure No-Finding images...")
+            
+            # Separate pathology and pure no-finding images
+            pathology_indices = []
+            nofinding_indices = []
+            
+            for idx in all_indices:
+                if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx]):
+                    pathology_indices.append(idx)
+                else:
+                    nofinding_indices.append(idx)
+            
+            # Randomly sample the specified fraction of no-finding images
+            if nofinding_indices:
+                np.random.seed(42)
+                n_nofinding_to_keep = int(len(nofinding_indices) * fraction)
+                sampled_nofinding = np.random.choice(
+                    nofinding_indices, 
+                    size=n_nofinding_to_keep, 
+                    replace=False
+                ).tolist()
+            else:
+                sampled_nofinding = []
+            
+            # Combine: ALL pathology + sampled no-finding
+            valid_indices = pathology_indices + sampled_nofinding
+            valid_indices.sort()
+            
+            print(f"  Pathology images: {len(pathology_indices)} (all included)")
+            print(f"  Pure no-finding images: {len(nofinding_indices)} total, kept {len(sampled_nofinding)} ({fraction*100:.1f}%)")
+            print(f"  Final training set: {len(valid_indices)} images")
         
         # Step 2: Create sampler
         if cfg.DATA.BALANCED_SAMPLER:
             print("Using balanced (RFS) sampling...")
             sampler = create_balanced_sampler(
                 train_dataset,
-                # dataset_to_sample,
                 rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
                 downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
-                indices=valid_indices if cfg.DATA.IGNORE_NOFINDING_IMAGES else None,  # NEW parameter
+                indices=valid_indices if len(valid_indices) < len(all_indices) else None,
             )
             return DataLoader(
-                train_dataset if not cfg.DATA.IGNORE_NOFINDING_IMAGES else dataset_to_sample,
+                train_dataset,
                 batch_size=cfg.TRAIN.BATCH_SIZE,
                 sampler=sampler,
                 shuffle=False,
@@ -122,9 +161,8 @@ class DetectionLightningDataModule(pl.LightningDataModule):
             )
         else:
             # No balanced sampler
-            if cfg.DATA.IGNORE_NOFINDING_IMAGES:
-                # Already filtered, just need deterministic sampling
-                sampler = torch.utils.data.SubsetRandomSampler(valid_indices)
+            if len(valid_indices) < len(all_indices):
+                sampler = SubsetRandomSampler(valid_indices)
                 return DataLoader(
                     train_dataset,
                     batch_size=cfg.TRAIN.BATCH_SIZE,
@@ -136,6 +174,7 @@ class DetectionLightningDataModule(pl.LightningDataModule):
                     persistent_workers=True,
                     prefetch_factor=2,
                 )
+        
         return DataLoader(
             train_dataset,
             batch_size=cfg.TRAIN.BATCH_SIZE,
@@ -159,35 +198,67 @@ class DetectionLightningDataModule(pl.LightningDataModule):
 
     # Overfit Subset Builder
     def build_overfit_subset(self, cfg, train_dataset):
-        # Filter out pure no-finding images if requested
-        dataset_to_sample = train_dataset
+        import numpy as np
+        from torch.utils.data import Subset
+        
+        num_needed = int(cfg.TRAIN.OVERFIT_BATCHES) * int(cfg.TRAIN.BATCH_SIZE)
+        
+        # Apply no-finding filtering/sampling for overfit mode too
+        all_indices = list(range(len(train_dataset)))
+        valid_indices = all_indices
+        
         if cfg.DATA.IGNORE_NOFINDING_IMAGES:
             print("[Overfit] Filtering pure No-Finding images...")
             valid_indices = [
-                idx for idx in range(len(train_dataset))
+                idx for idx in all_indices
                 if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx])
             ]
-            dataset_to_sample = Subset(train_dataset, valid_indices)
-            print(f"[Overfit] Working with {len(valid_indices)}/{len(train_dataset)} pathology images.")
+        elif cfg.DATA.NOFINDING_INCLUDE_FRACTION < 1.0:
+            fraction = cfg.DATA.NOFINDING_INCLUDE_FRACTION
+            print(f"[Overfit] Sampling {fraction*100:.1f}% of pure No-Finding images...")
+            
+            pathology_indices = []
+            nofinding_indices = []
+            for idx in all_indices:
+                if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx]):
+                    pathology_indices.append(idx)
+                else:
+                    nofinding_indices.append(idx)
+            
+            if nofinding_indices:
+                np.random.seed(42)
+                n_nofinding_to_keep = int(len(nofinding_indices) * fraction)
+                sampled_nofinding = np.random.choice(
+                    nofinding_indices, 
+                    size=n_nofinding_to_keep, 
+                    replace=False
+                ).tolist()
+                valid_indices = pathology_indices + sampled_nofinding
+                valid_indices.sort()
+            else:
+                valid_indices = pathology_indices
         
-        num_needed = int(cfg.TRAIN.OVERFIT_BATCHES) * int(cfg.TRAIN.BATCH_SIZE)
+        # Create sampler over filtered indices
         sampler = create_balanced_sampler(
-            dataset_to_sample,
+            train_dataset,
             rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
             downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
+            indices=valid_indices if len(valid_indices) < len(all_indices) else None,
         )
+        
         g = torch.Generator()
         g.manual_seed(42)
         try:
             sampler.generator = g
         except Exception:
             pass
+        
         it = iter(sampler)
         fixed_indices = [int(next(it)) for _ in range(num_needed)]
         
-        # Map back to original dataset indices if we used a Subset
-        if isinstance(dataset_to_sample, Subset):
-            fixed_indices = [dataset_to_sample.indices[i] for i in fixed_indices]
+        # Map back to original dataset indices
+        if len(valid_indices) < len(all_indices):
+            fixed_indices = [valid_indices[i] for i in fixed_indices]
         
         subset = Subset(train_dataset, fixed_indices)
         print(

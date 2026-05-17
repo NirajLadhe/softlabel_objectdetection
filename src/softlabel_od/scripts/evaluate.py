@@ -48,6 +48,47 @@ def evaluate(args):
         label_mode=label_mode,
     )
 
+    # Apply no-finding filtering/sampling for evaluation
+    all_indices = list(range(len(val_dataset)))
+    valid_indices = all_indices
+    
+    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
+        print("Filtering pure No-Finding images (healthy CXR) from validation set...")
+        valid_indices = [
+            idx for idx in all_indices
+            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx])
+        ]
+    elif cfg.DATA.NOFINDING_INCLUDE_FRACTION < 1.0:
+        fraction = cfg.DATA.NOFINDING_INCLUDE_FRACTION
+        print(f"Sampling {fraction*100:.1f}% of pure No-Finding images for validation...")
+        
+        pathology_indices = []
+        nofinding_indices = []
+        for idx in all_indices:
+            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx]):
+                pathology_indices.append(idx)
+            else:
+                nofinding_indices.append(idx)
+        
+        if nofinding_indices:
+            np.random.seed(42)
+            n_nofinding_to_keep = int(len(nofinding_indices) * fraction)
+            sampled_nofinding = np.random.choice(
+                nofinding_indices, 
+                size=n_nofinding_to_keep, 
+                replace=False
+            ).tolist()
+            valid_indices = pathology_indices + sampled_nofinding
+            valid_indices.sort()
+        else:
+            valid_indices = pathology_indices
+        
+        print(f"  Validation: {len(pathology_indices)} pathology + {len(sampled_nofinding if nofinding_indices else [])} no-finding = {len(valid_indices)} total")
+    
+    if len(valid_indices) < len(all_indices):
+        from torch.utils.data import Subset
+        val_dataset = Subset(val_dataset, valid_indices)
+
     # Filter out pure no-finding images if configured
     if cfg.DATA.IGNORE_NOFINDING_IMAGES:
         print("Filtering pure No-Finding images (healthy CXR) from validation set...")

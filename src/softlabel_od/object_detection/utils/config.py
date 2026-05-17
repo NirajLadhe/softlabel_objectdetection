@@ -26,6 +26,7 @@ def get_cfg_defaults():
     _C.DATA.OVERSAMPLE_FACTOR = 1.0
     _C.DATA.IGNORE_NOFINDING_IMAGES = False  # Skip images with only no-finding clusters
     _C.DATA.DOWNWEIGHT_NOFINDING_IMAGES = False  # Downweight pure no-finding in balanced sampler
+    _C.DATA.NOFINDING_INCLUDE_FRACTION = 1.0  # Fraction of pure no-finding images to include (0.0-1.0)
     _C.DATA.OPTIONS = CN(new_allowed=True)
     # Model settings
     _C.MODEL = CN()

@@ -88,43 +88,85 @@ def build_train_sampler(cfg, train_dataset):
     """
     Build training sampler with unified no-finding handling.
     
-    Two independent flags:
-        IGNORE_NOFINDING_IMAGES: Skip images with only no-finding clusters (healthy CXR)
-        DOWNWEIGHT_NOFINDING_IMAGES: Downweight pure no-finding images in balanced sampler
+    Three strategies for handling pure no-finding (healthy CXR) images:
+        1. IGNORE_NOFINDING_IMAGES=True: Skip ALL pure no-finding images
+        2. NOFINDING_INCLUDE_FRACTION=x: Include only x% of pure no-finding images (randomly sampled)
+        3. DOWNWEIGHT_NOFINDING_IMAGES=True: Include all but downweight in balanced sampler
     
     Returns (sampler, shuffle).
     """
-    # Step 1: Filter out pure no-finding images if requested
-    # This applies BEFORE sampler creation, so balanced sampler works on pathology images only
-    dataset_to_sample = train_dataset
+    import numpy as np
+    from torch.utils.data import Subset, SubsetRandomSampler
+    
+    # Step 1: Determine which images to include based on no-finding strategy
+    all_indices = list(range(len(train_dataset)))
+    valid_indices = all_indices
+    
+    # Strategy 1: Completely ignore all pure no-finding images
     if cfg.DATA.IGNORE_NOFINDING_IMAGES:
         print("Filtering pure No-Finding images (healthy CXR) from training set...")
         valid_indices = [
-            idx for idx in range(len(train_dataset))
+            idx for idx in all_indices
             if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx])
         ]
         kept = len(valid_indices)
-        total = len(train_dataset)
+        total = len(all_indices)
         print(f"  Kept {kept}/{total} images ({kept/total*100:.1f}% have pathology).")
+    
+    # Strategy 2: Include only a fraction of pure no-finding images
+    elif cfg.DATA.NOFINDING_INCLUDE_FRACTION < 1.0:
+        fraction = cfg.DATA.NOFINDING_INCLUDE_FRACTION
+        print(f"Sampling {fraction*100:.1f}% of pure No-Finding images...")
         
-        # Create filtered dataset for sampler to work on
-        from torch.utils.data import Subset
+        # Separate pathology and pure no-finding images
+        pathology_indices = []
+        nofinding_indices = []
+        
+        for idx in all_indices:
+            if train_dataset.has_pathology_clusters(train_dataset.image_ids[idx]):
+                pathology_indices.append(idx)
+            else:
+                nofinding_indices.append(idx)
+        
+        # Randomly sample the specified fraction of no-finding images
+        if nofinding_indices:
+            # Set seed for reproducibility (can be made configurable)
+            np.random.seed(42)
+            n_nofinding_to_keep = int(len(nofinding_indices) * fraction)
+            sampled_nofinding = np.random.choice(
+                nofinding_indices, 
+                size=n_nofinding_to_keep, 
+                replace=False
+            ).tolist()
+        else:
+            sampled_nofinding = []
+        
+        # Combine: ALL pathology + sampled no-finding
+        valid_indices = pathology_indices + sampled_nofinding
+        valid_indices.sort()  # Maintain original order
+        
+        print(f"  Pathology images: {len(pathology_indices)} (all included)")
+        print(f"  Pure no-finding images: {len(nofinding_indices)} total, kept {len(sampled_nofinding)} ({fraction*100:.1f}%)")
+        print(f"  Final training set: {len(valid_indices)} images")
+    
+    # Create dataset to sample from (Subset if filtering was applied)
+    dataset_to_sample = train_dataset
+    if len(valid_indices) < len(all_indices):
         dataset_to_sample = Subset(train_dataset, valid_indices)
     
     # Step 2: Create sampler
     if cfg.DATA.BALANCED_SAMPLER:
         print("Using balanced (RFS) sampling...")
         sampler = create_balanced_sampler(
-            dataset_to_sample,
+            train_dataset,  # Pass original dataset
             rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
             downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
+            indices=valid_indices if len(valid_indices) < len(all_indices) else None,
         )
         return sampler, False
     else:
-        # No balanced sampler, use filtered indices directly if filtering was applied
-        if cfg.DATA.IGNORE_NOFINDING_IMAGES:
-            # Return SubsetRandomSampler over filtered indices
-            from torch.utils.data import SubsetRandomSampler
+        # No balanced sampler - use SubsetRandomSampler if we filtered
+        if len(valid_indices) < len(all_indices):
             sampler = SubsetRandomSampler(valid_indices)
             return sampler, False
         else:

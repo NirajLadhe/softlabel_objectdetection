@@ -140,7 +140,7 @@ def create_balanced_sampler(
     presence_prob_thresh=0.1,
     downweight_nofinding=False,
     alpha=0.5,
-    nofinding_weight=0.1,
+    nofinding_weight=0.2,
     indices=None,  # NEW: optional list of indices to limit sampling
 ):
     """
