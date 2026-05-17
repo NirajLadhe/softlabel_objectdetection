@@ -166,6 +166,7 @@ def main():
     soft_labels = []
 
     for image_id in tqdm(subset_image_ids, desc="Processing Images"):
+        image_id_str = str(image_id)
         all_annotations_for_image = subset_image_data[image_id]
         all_rater_ids_on_image = {
             ann["rater_id"] for ann in all_annotations_for_image if "rater_id" in ann
@@ -180,7 +181,7 @@ def main():
             semantic_map=semantic_map,
         )
 
-        img_meta = image_metadata.get(image_id, {})
+        img_meta = image_metadata.get(image_id_str, {})
 
         for cluster_idx, cluster_anns in enumerate(annotation_clusters):
             valid_anns = [a for a in cluster_anns if a["weight"] > 1e-6]

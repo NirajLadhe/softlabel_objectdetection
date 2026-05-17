@@ -6,6 +6,7 @@ Probabilistic metrics (require model to output 'bbox_stds' / 'class_probs'):
     compute_bbox_uncertainty_calibration
     compute_soft_detection_metrics
     compute_class_distribution_metrics
+    compute_pdq  ← PDQ: Probabilistic Detection Quality
 
 Standard detection metrics:
     compute_map
@@ -27,5 +28,5 @@ from softlabel_od.object_detection.core.evaluation.metrics import (
     compute_soft_class_metrics,
     evaluate_default_metrics,
 )
-
+from softlabel_od.object_detection.core.evaluation.pdq import compute_pdq, evaluate_pdq
 from softlabel_od.object_detection.core.evaluation.tide import evaluate_tide
