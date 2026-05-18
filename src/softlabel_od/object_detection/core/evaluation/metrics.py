@@ -10,6 +10,7 @@ from scipy import stats
 from scipy.special import erf
 from sklearn.metrics import average_precision_score
 import warnings
+from scipy.optimize import linear_sum_assignment
 
 
 def compute_iou_batch(boxes1, boxes2):
@@ -57,50 +58,48 @@ def compute_iou_batch(boxes1, boxes2):
 
 def match_predictions_to_gt(pred_boxes, pred_scores, gt_boxes, iou_threshold=0.5):
     """
-    Match predictions to ground truth boxes using Hungarian matching.
-    
+    Match predictions to ground truth boxes using Hungarian (optimal) assignment.
+
+    Builds a cost matrix ``1 - IoU`` and runs ``scipy.optimize.linear_sum_assignment``
+    to pick a one-to-one assignment that maximizes total IoU. Pairs with IoU < tau
+    are rejected (prediction → FP, GT → FN).
+
+    ``pred_scores`` is kept for API compatibility with callers; assignment is
+    based on IoU only, not confidence.
+
     Returns:
         matches: list of (pred_idx, gt_idx, iou) tuples
         unmatched_preds: list of unmatched prediction indices
         unmatched_gts: list of unmatched GT indices
     """
-    if len(pred_boxes) == 0 or len(gt_boxes) == 0:
-        return [], list(range(len(pred_boxes))), list(range(len(gt_boxes)))
-    
-    # Compute IoU matrix
+    n_pred = len(pred_boxes)
+    n_gt = len(gt_boxes)
+
+    if n_pred == 0 or n_gt == 0:
+        return [], list(range(n_pred)), list(range(n_gt))
+
+    pred_boxes = np.asarray(pred_boxes, dtype=np.float64)
+    gt_boxes = np.asarray(gt_boxes, dtype=np.float64)
+
     iou_matrix = compute_iou_batch(pred_boxes, gt_boxes)
-    
-    # Greedy matching (sorted by confidence)
+    large = 1e6
+    cost_matrix = np.where(iou_matrix >= iou_threshold, 1.0 - iou_matrix, large)
+    row_ids, col_ids = linear_sum_assignment(cost_matrix)
+
     matches = []
-    matched_gt = set()
-    
-    # Sort predictions by score
-    sorted_indices = np.argsort(-pred_scores)
-    
-    for pred_idx in sorted_indices:
-        best_iou = 0
-        best_gt_idx = -1
-        
-        for gt_idx in range(len(gt_boxes)):
-            if gt_idx in matched_gt:
-                continue
-            
-            iou = iou_matrix[pred_idx, gt_idx]
-            if iou > best_iou and iou >= iou_threshold:
-                best_iou = iou
-                best_gt_idx = gt_idx
-        
-        if best_gt_idx >= 0:
-            matches.append((pred_idx, best_gt_idx, best_iou))
-            matched_gt.add(best_gt_idx)
-    
-    # Find unmatched
-    matched_preds = {m[0] for m in matches}
-    matched_gts_set = {m[1] for m in matches}
-    
-    unmatched_preds = [i for i in range(len(pred_boxes)) if i not in matched_preds]
-    unmatched_gts = [i for i in range(len(gt_boxes)) if i not in matched_gts_set]
-    
+    matched_preds = set()
+    matched_gts = set()
+
+    for pred_idx, gt_idx in zip(row_ids, col_ids):
+        iou = float(iou_matrix[pred_idx, gt_idx])
+        if iou >= iou_threshold:
+            matches.append((int(pred_idx), int(gt_idx), iou))
+            matched_preds.add(int(pred_idx))
+            matched_gts.add(int(gt_idx))
+
+    unmatched_preds = [i for i in range(n_pred) if i not in matched_preds]
+    unmatched_gts = [i for i in range(n_gt) if i not in matched_gts]
+
     return matches, unmatched_preds, unmatched_gts
 
 
@@ -194,9 +193,21 @@ def compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75]):
     
     results = {}
     for i, thresh in enumerate(iou_thresholds):
-        aps = [ap_per_class[cls][i] for cls in all_classes]
-        results[f'mAP_{int(thresh*100)}'] = np.mean(aps)
+        # Exclude No Finding (class 1) from the standard pathology mAP
+        aps = [ap_per_class[cls][i] for cls in all_classes if cls > 1]
+        if len(aps) > 0:
+            results[f'mAP_{int(thresh*100)}'] = np.mean(aps)
+        else:
+            results[f'mAP_{int(thresh*100)}'] = 0.0
+            
+        # Compute AP for No Finding separately
+        if 1 in ap_per_class:
+            results[f'AP_NoFinding_{int(thresh*100)}'] = ap_per_class[1][i]
     
+    if 1 in ap_per_class:
+        results['AP_NoFinding'] = np.mean([results[f'AP_NoFinding_{int(t*100)}'] for t in iou_thresholds])
+    
+    # Calculate overall mAP only over pathology classes
     results['mAP'] = np.mean([results[f'mAP_{int(t*100)}'] for t in iou_thresholds])
     results['per_class_ap'] = {cls: np.mean(aps) for cls, aps in ap_per_class.items()}
     
@@ -788,6 +799,8 @@ def evaluate_default_metrics(
     map_results = compute_map(predictions, ground_truths, iou_thresholds=[0.4, 0.5, 0.75])
     results["mAP"] = {k: float(v) if not isinstance(v, dict) else v for k, v in map_results.items()}
     print(f"  mAP:              {map_results['mAP']:.4f}")
+    if 'AP_NoFinding' in map_results:
+        print(f"  AP_NoFinding:     {map_results['AP_NoFinding']:.4f}")
     print(f"  mAP@40:           {map_results['mAP_40']:.4f}")
     print(f"  mAP@50:           {map_results['mAP_50']:.4f}")
     print(f"  mAP@75:           {map_results['mAP_75']:.4f}")
