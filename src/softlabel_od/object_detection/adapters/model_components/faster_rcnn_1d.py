@@ -351,10 +351,14 @@ class ProbabilisticRoIHeads(RoIHeads):
                 labels_flat = labels_flat.view(1, -1).expand(boxes_i.shape[0], -1).reshape(-1)
                 
                 
-                # Stage 1: gate on foreground confidence — one test per proposal
-                fg_confidence = 1.0 - scores_i_full[:, 0]       # [num_proposals]
-                fg_mask = fg_confidence > self.score_thresh      # score_thresh=0.5
-
+                # Stage 1: gate on pathology confidence vs no-finding confidence
+                pathology_scores = scores_i_full[:, 2:]  # indices 2-15
+                max_pathology_score = pathology_scores.max(dim=-1).values
+                pathology_mask = max_pathology_score > self.score_thresh
+                nofinding_score = scores_i_full[:, 1]
+                # A proposal is a No Finding prediction if its No Finding score is high and it's not a pathology
+                nofinding_mask = (nofinding_score > self.score_thresh) & ~pathology_mask
+                fg_mask = pathology_mask | nofinding_mask
                 if fg_mask.sum() == 0:
                     result.append({
                         "boxes":       torch.empty((0, 4), device=gmm_params.device),
@@ -364,26 +368,35 @@ class ProbabilisticRoIHeads(RoIHeads):
                         "class_probs": torch.empty((0, num_classes), device=gmm_params.device),
                     })
                     continue
-
                 # Filter all per-proposal tensors
                 boxes_fg    = boxes_i[fg_mask]           # [M, C-1, 4]
                 stds_fg     = stds_i[fg_mask]            # [M, C-1, 4]
                 scores_fg   = scores_i[fg_mask]          # [M, C-1]
-                fg_conf_fg  = fg_confidence[fg_mask]     # [M]
                 full_probs_fg = scores_i_full[fg_mask]   # [M, num_classes]
-
                 # Stage 2: pick MAP class label per surviving proposal
-                map_class_idx = scores_fg.argmax(dim=-1)         # [M], 0-indexed over fg classes
-                labels_out    = map_class_idx + 1                # shift to 1-indexed
-
-                M   = boxes_fg.shape[0]
+                is_pathology = pathology_mask[fg_mask]
+                M = boxes_fg.shape[0]
+                
+                map_class_idx = torch.zeros(M, dtype=torch.long, device=scores_fg.device)
+                
+                # For pathology proposals, argmax over pathology classes (indices 1 to C-1 in scores_fg)
+                if is_pathology.any():
+                    path_idx = scores_fg[is_pathology, 1:].argmax(dim=-1) + 1
+                    map_class_idx[is_pathology] = path_idx
+                
+                # For nofinding proposals, class is 0 in scores_fg
+                if (~is_pathology).any():
+                    map_class_idx[~is_pathology] = 0
+                
+                labels_out = map_class_idx + 1
+                fg_conf_fg = scores_fg.gather(1, map_class_idx.unsqueeze(-1)).squeeze(-1)
                 idx = map_class_idx.unsqueeze(-1).unsqueeze(-1)  # [M, 1, 1]
                 boxes_out = boxes_fg.gather(1, idx.expand(-1, -1, 4)).squeeze(1)   # [M, 4]
                 stds_out  = stds_fg.gather(1, idx.expand(-1, -1, 4)).squeeze(1)    # [M, 4]
-
                 # Stage 3: NMS on foreground confidence
                 keep = torchvision.ops.nms(boxes_out, fg_conf_fg, self.nms_thresh)
                 keep = keep[:self.detections_per_img]
+
 
                 result.append({
                     "boxes":       boxes_out[keep],

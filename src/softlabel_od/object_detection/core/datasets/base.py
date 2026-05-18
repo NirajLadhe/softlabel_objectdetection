@@ -24,14 +24,14 @@ from softlabel_od.object_detection.utils.training_helpers import load_rater_weig
 from softlabel_od.object_detection.utils.config import get_cfg_defaults
 
 cfg = get_cfg_defaults()
-BACKGROUND_KEYS = {
-    "__background__",
+NO_FINDING_KEYS = {
     "NoFindingInCluster",
     "No Finding",
     "No finding",
     "NoFinding",
     "no_finding",
 }
+BACKGROUND_KEYS = {"__background__"}
 
 
 def normalize_label_mode(
@@ -225,10 +225,14 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         prob_vector = torch.zeros(self.get_num_classes(), dtype=torch.float32)
         for class_name, prob in (class_probs or {}).items():
             if class_name in self.class_to_idx:
-                prob_vector[self.class_to_idx[class_name]] = float(prob)
-            elif self.is_background_key(class_name):
-                prob_vector[0] = float(prob)
-
+                prob_vector[self.class_to_idx[class_name]] += float(prob)
+            elif class_name in NO_FINDING_KEYS:
+                if "No Finding" in self.class_to_idx:
+                    prob_vector[self.class_to_idx["No Finding"]] += float(prob)
+                else:
+                    prob_vector[0] += float(prob)
+            elif class_name in BACKGROUND_KEYS:
+                prob_vector[0] += float(prob)
         prob_sum = prob_vector.sum()
         if prob_sum > 0:
             prob_vector = prob_vector / prob_sum
@@ -329,8 +333,8 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             # Skip placeholder records
             if self.record_is_placeholder(label):
                 continue
-            # Check if this cluster has a pathology (non-background) dominant class
-            if self.get_cluster_dominant_overall(label) != 0:
+            # Check if this cluster has a pathology (non-background) dominant class (No Finding is class 1)
+            if self.get_cluster_dominant_overall(label) >1 :
                 return True
         return False
     
@@ -351,6 +355,8 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             if class_name not in self.class_to_idx:
                 continue
             cls = self.class_to_idx[class_name]
+            if cls <= 1: # added check for No Finding (class 1)
+                continue
             if prob > best_prob:
                 best_prob = float(prob)
                 best_class = cls
@@ -409,7 +415,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                     total += 1
 
         weights = torch.ones(num_classes, dtype=torch.float32)
-        disease_classes = list(range(1, num_classes))
+        disease_classes = list(range(2, num_classes))
         total = max(1, total)
         num_disease_classes = max(1, len(disease_classes))
 
@@ -431,6 +437,10 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             weights[disease_classes] = weights[disease_classes] / mean_weight
         weights = weights.clamp(max=max_weight)
         weights[0] = 1.0
+
+        # Explicitly set No Finding weight to 1.0
+        if "No Finding" in self.class_to_idx:
+            weights[self.class_to_idx["No Finding"]] = 0.5
 
         if verbose:
             reverse_mapping = {idx: name for name, idx in self.class_to_idx.items()}
@@ -557,10 +567,13 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             spatial = label.get("spatial") or {}
             mean_box = spatial.get("mean")
             std_box = spatial.get("std")
-            if not mean_box or not std_box or self.is_placeholder_mean_box(mean_box):
+            # if not mean_box or not std_box or self.is_placeholder_mean_box(mean_box):
+            #     continue
+            # REMOVED: self.is_placeholder_mean_box(mean_box)
+            if not mean_box or not std_box:
                 continue
 
-            if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) == 0:
+            if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) <= 1: # No Finding is class 1
                 continue
 
             x_mean = mean_box[0] * orig_w
@@ -581,9 +594,18 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                 if rater_ids:
                     weight = float(sum(self.rater_weights.get(rater_id, 0.5) for rater_id in rater_ids) / len(rater_ids))
                 else:
-                    weight = max(float(1.0 - prob_vector[0].item()), 0.1)
+                    bg_prob = prob_vector[0].item() + (prob_vector[self.class_to_idx["No Finding"]].item() if "No Finding" in self.class_to_idx else 0)
+                    weight = max(float(1.0 - bg_prob), 0.1)
             else:
-                weight = max(float(1.0 - prob_vector[0].item()), 0.1)
+                bg_prob = prob_vector[0].item() + (prob_vector[self.class_to_idx["No Finding"]].item() if "No Finding" in self.class_to_idx else 0)
+                weight = max(float(1.0 - bg_prob), 0.1)
+
+            # NEW: Downweight if No Finding is the majority (handles singletons and full-image placeholders)
+            if "No Finding" in self.class_to_idx:
+                nf_idx = self.class_to_idx["No Finding"]
+                if prob_vector[nf_idx].item() > 0.5:
+                    weight = weight * max(float(1.0 - prob_vector[nf_idx].item()), 0.1)
+
             annotation_weights_list.append(weight)
 
             dominant_disease = self.get_cluster_dominant_disease(label)
@@ -649,7 +671,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
             prob_vector = self.build_class_prob_vector(label.get("class_probs"))
             class_probs.append(prob_vector)
-            labels_tensor.append(self.get_cluster_dominant_disease(label) or 0)
+            labels_tensor.append(self.get_cluster_dominant_disease(label) or 1)
 
         if not boxes:
             boxes = torch.zeros((0, 4), dtype=torch.float32)
