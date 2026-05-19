@@ -180,6 +180,19 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
     def is_background_key(self, class_name: str) -> bool:
         return class_name in BACKGROUND_KEYS
+    
+    def is_nofinding_key(self, class_name: str) -> bool:
+        return class_name in NO_FINDING_KEYS
+
+    def resolve_class_name_to_idx(self, class_name: str) -> int | None:
+        """Map a label string to a model class index (0=background, 1=No Finding, 2+=pathology)."""
+        if class_name in self.class_to_idx:
+            return self.class_to_idx[class_name]
+        if self.is_nofinding_key(class_name) and "No Finding" in self.class_to_idx:
+            return self.class_to_idx["No Finding"]
+        if class_name in BACKGROUND_KEYS:
+            return 0
+        return None
 
     def is_placeholder_bbox(self, bbox: List[float] | tuple[float, ...] | None) -> bool:
         if not bbox or len(bbox) != 4:
@@ -226,7 +239,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         for class_name, prob in (class_probs or {}).items():
             if class_name in self.class_to_idx:
                 prob_vector[self.class_to_idx[class_name]] += float(prob)
-            elif class_name in NO_FINDING_KEYS:
+            elif self.is_nofinding_key(class_name):
                 if "No Finding" in self.class_to_idx:
                     prob_vector[self.class_to_idx["No Finding"]] += float(prob)
                 else:
@@ -254,12 +267,9 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                         present.add(self.class_to_idx[class_name])
         else:
             for finding in labels:
-                if "renormalized_class_probs" in finding:
-                    for class_name, prob in (finding.get("renormalized_class_probs") or {}).items():
-                        if class_name in self.class_to_idx and prob >= threshold:
-                            present.add(self.class_to_idx[class_name])
-                elif "class" in finding and finding["class"] in self.class_to_idx:
-                    present.add(self.class_to_idx[finding["class"]])
+                dominant = self.get_dominant_class(labels_data=[finding])
+                if dominant >= 1:
+                    present.add(dominant)
         return present
 
     def get_dominant_class(
@@ -276,21 +286,24 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         class_vote_counts: Dict[int, float] = {}
         for label in labels_data:
             if self.dataset_type == "hard":
-                if "renormalized_class_probs" in label:
-                    renorm_probs = label["renormalized_class_probs"]
-                    best_class = None
-                    best_prob = 0.0
-                    for class_name, prob in renorm_probs.items():
-                        if class_name in self.class_to_idx and prob > best_prob:
-                            best_prob = float(prob)
-                            best_class = self.class_to_idx[class_name]
-                    if best_class is not None:
-                        class_vote_counts[best_class] = class_vote_counts.get(best_class, 0.0) + best_prob
-                elif "class" in label:
-                    class_name = label["class"]
-                    if class_name in self.class_to_idx:
-                        class_idx = self.class_to_idx[class_name]
-                        class_vote_counts[class_idx] = class_vote_counts.get(class_idx, 0.0) + 1.0
+                best_class = None
+                best_prob = -1.0
+
+                renorm_probs = label.get("renormalized_class_probs") or {}
+                for class_name, prob in renorm_probs.items():
+                    cls = self.resolve_class_name_to_idx(class_name)
+                    if cls is not None and float(prob) > best_prob:
+                        best_prob = float(prob)
+                        best_class = cls
+
+                if best_class is None and "class" in label:
+                    cls = self.resolve_class_name_to_idx(label["class"])
+                    if cls is not None:
+                        best_class = cls
+                        best_prob = 1.0
+
+                if best_class is not None:
+                    class_vote_counts[best_class] = class_vote_counts.get(best_class, 0.0) + best_prob
             else:
                 best_class = None
                 best_prob = 0.0
@@ -310,15 +323,14 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         best_class = 0
         best_prob = -1.0
         for class_name, prob in probs.items():
-            if class_name in self.class_to_idx:
-                cls = self.class_to_idx[class_name]
-            elif self.is_background_key(class_name):
-                cls = 0
-            else:
+            cls = self.resolve_class_name_to_idx(class_name)
+            if cls is None:
                 continue
             if prob > best_prob:
                 best_prob = float(prob)
                 best_class = cls
+        if best_class == 0 and self.dataset_type == "hard":
+            return self.get_dominant_class(labels_data=[cluster_label])
         return best_class
     
     def has_pathology_clusters(self, image_id: str) -> bool:
@@ -333,8 +345,8 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             # Skip placeholder records
             if self.record_is_placeholder(label):
                 continue
-            # Check if this cluster has a pathology (non-background) dominant class (No Finding is class 1)
-            if self.get_cluster_dominant_overall(label) >1 :
+            # Check if this cluster has a pathology (non-background) dominant class
+            if self.get_cluster_dominant_overall(label) >= 2:
                 return True
         return False
     
@@ -395,23 +407,18 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                     total += 1
             else:
                 for finding in labels:
-                    if "renormalized_class_probs" in finding:
-                        best_class = None
-                        best_prob = -1.0
-                        for class_name, prob in (finding.get("renormalized_class_probs") or {}).items():
-                            if class_name in self.class_to_idx and prob > best_prob:
-                                best_prob = float(prob)
-                                best_class = self.class_to_idx[class_name]
-                        if best_class is None:
-                            continue
-                        cls = best_class
-                    elif "class" in finding and finding["class"] in self.class_to_idx:
-                        cls = self.class_to_idx[finding["class"]]
-                    else:
+                    best_class = None
+                    best_prob = -1.0
+                    for class_name, prob in (finding.get("renormalized_class_probs") or {}).items():
+                        cls = self.resolve_class_name_to_idx(class_name)
+                        if cls is not None and float(prob) > best_prob:
+                            best_prob = float(prob)
+                            best_class = cls
+                    if best_class is None and "class" in finding:
+                        best_class = self.resolve_class_name_to_idx(finding["class"])
+                    if best_class is None or best_class <= 1:
                         continue
-                    if cls == 0:
-                        continue
-                    counts[cls] += 1
+                    counts[best_class] += 1
                     total += 1
 
         weights = torch.ones(num_classes, dtype=torch.float32)
@@ -440,7 +447,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
         # Explicitly set No Finding weight to 1.0
         if "No Finding" in self.class_to_idx:
-            weights[self.class_to_idx["No Finding"]] = 0.5
+            weights[self.class_to_idx["No Finding"]] = 0.1
 
         if verbose:
             reverse_mapping = {idx: name for name, idx in self.class_to_idx.items()}
@@ -514,8 +521,19 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             dominant_class = self.get_dominant_class(labels_data=[finding])
             if dominant_class == 0:
                 continue
+            # 0=background, 1=No Finding; skip both when ignoring NF clusters
+            if self.ignore_nofinding_clusters and dominant_class <= 1:
+                continue
 
             bbox = finding["bbox"]
+            # Full-image NF placeholder only when the whole image is pure no-finding
+            if (
+                dominant_class == 1
+                and self.is_placeholder_bbox(bbox)
+                and not self.is_pure_nofinding_image(image_id)
+            ):
+                continue
+
             norm_x, norm_y, norm_w, norm_h = bbox
             x = norm_x * orig_w
             y = norm_y * orig_h
@@ -573,7 +591,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             if not mean_box or not std_box:
                 continue
 
-            if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) <= 1: # No Finding is class 1
+            if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) <= 1:
                 continue
 
             x_mean = mean_box[0] * orig_w
