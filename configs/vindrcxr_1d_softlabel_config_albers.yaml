@@ -7,7 +7,7 @@ DATA:
   GMM_TYPE: '1D' 
   TEST_SPLIT_RATIO: 0.20
   BALANCED_SAMPLER: True
-  OVERSAMPLE_FACTOR: 0.25   # RFS THRESHOLD
+  RFS_THRESHOLD: 0.25   # RFS THRESHOLD
   # No-Finding handling:
   # IGNORE_NOFINDING_IMAGES=True: Skip images with only no-finding clusters (healthy CXR)
   #   Applied before sampler creation, so balanced sampler works on pathology images only
