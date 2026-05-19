@@ -458,8 +458,11 @@ class HardLabelRoIHeads(RoIHeads):
             # Build one-hot targets for soft_focal_loss
             # gt_class_probs = torch.nn.functional.one_hot(labels.clamp_min(0), num_classes=class_logits.shape[1]).float()
             
-            LAMBDA_CLS = 10.0
-            loss_classifier = torch.nn.functional.cross_entropy(class_logits, labels) * LAMBDA_CLS
+            LAMBDA_CLS = 2.0
+            # class_weights = getattr(self, "class_weights", None)
+            # class_weights = class_weights.to(device = class_logits.device, dtype = class_logits.dtype) if class_weights is not None else None
+
+            loss_classifier = torch.nn.functional.cross_entropy(class_logits, labels, weight=self.class_weights, reduction='none').mean() * LAMBDA_CLS
             
             # Regression Loss (Smooth L1 Loss)
             sampled_pos_inds_subset = torch.where(labels > 0)[0]
@@ -467,7 +470,7 @@ class HardLabelRoIHeads(RoIHeads):
             N = class_logits.shape[0]
             box_regression = box_regression.reshape(N, -1, 4)
             
-            LAMBDA_BOX_REG = 5.0
+            LAMBDA_BOX_REG = 4.0
             loss_box_reg = torch.nn.functional.smooth_l1_loss(
                 box_regression[sampled_pos_inds_subset, labels_pos],
                 regression_targets[sampled_pos_inds_subset],
