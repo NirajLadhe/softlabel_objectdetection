@@ -196,35 +196,49 @@ def main():
     parser.add_argument("--output", type=str, default=os.path.join(PROJECT_ROOT, "outputs/vindrcxr/evaluation_results"))
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-classes", type=int, default=16)
-    parser.add_argument("--backbone", type=str, default="resnet50")
+    parser.add_argument("--backbone", type=str, default="resnet50", choices=["resnet50", "resnet101", "mobilenet"])
     parser.add_argument("--test-split-ratio", type=float, default=0.20)
     parser.add_argument("--num-workers", type=int, default=None, help="Number of workers for dataloader (0 = single-process)")
     parser.add_argument("--cpu", action="store_true")
     args = parser.parse_args()
 
+    # Handle default values for num_workers
     if args.num_workers is None:
         if args.metric_type in ["pdq"]:
             args.num_workers = 1
         else:
             args.num_workers = 4
+
+    # Handle default values for label file
     if args.label_file is None:
         if args.gmm_type == "1D":
             args.label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json")
+        elif args.gmm_type == "HARD_LABEL":
+            args.label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json")
         else:
             raise ValueError(f"No label file provided for gmm type: {args.gmm_type}")
         print(f"Auto-selected label file: {args.label_file}")
+    
+    # Handle default values for config file
     if args.config is None:
-        args.config = os.path.join(PROJECT_ROOT, "configs/vindrcxr_1d_softlabel_config_albers.yaml")
+        if args.gmm_type == "1D":
+            args.config = os.path.join(PROJECT_ROOT, "configs/vindrcxr_1d_softlabel_config_albers.yaml")
+        elif args.gmm_type == "HARD_LABEL":
+            args.config = os.path.join(PROJECT_ROOT, "configs/vindrcxr_hardlabel_config_albers.yaml")
+        else:
+            raise ValueError(f"No config file provided for gmm type: {args.gmm_type}")
+
+    # Handle default values for eval tag
     if args.eval_tag is None:
         args.eval_tag = "1D_Gaussian_softlabels_iou0_5"
     
+
+    # Handle default values for priors file
     if args.priors_file is None:
         if args.gmm_type == "1D":
             args.priors_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/priors/class_priors_1d_iou0_5.json")
-        else:
-            raise ValueError(f"No priors file provided for gmm type: {args.gmm_type}")
-        print(f"Auto-selected priors file: {args.priors_file}")
-    
+        elif args.gmm_type == "HARD_LABEL":
+            pass
 
     evaluate(args)
 
