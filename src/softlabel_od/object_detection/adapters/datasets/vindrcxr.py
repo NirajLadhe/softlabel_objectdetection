@@ -51,20 +51,21 @@ class Vin_Dr_CXR_SoftLabel_Dataset(CanonicalDetectionDataset):
 
     def build_class_to_idx(self):
         return {
-            "Aortic enlargement": 1,
-            "Atelectasis": 2,
-            "Calcification": 3,
-            "Cardiomegaly": 4,
-            "Consolidation": 5,
-            "ILD": 6,
-            "Infiltration": 7,
-            "Lung Opacity": 8,
-            "Nodule/Mass": 9,
-            "Other lesion": 10,
-            "Pleural effusion": 11,
-            "Pleural thickening": 12,
-            "Pneumothorax": 13,
-            "Pulmonary fibrosis": 14,
+            "No Finding": 1,
+            "Aortic enlargement": 2,
+            "Atelectasis": 3,
+            "Calcification": 4,
+            "Cardiomegaly": 5,
+            "Consolidation": 6,
+            "ILD": 7,
+            "Infiltration": 8,
+            "Lung Opacity": 9,
+            "Nodule/Mass": 10,
+            "Other lesion": 11,
+            "Pleural effusion": 12,
+            "Pleural thickening": 13,
+            "Pneumothorax": 14,
+            "Pulmonary fibrosis": 15,
         }
 
     def resolve_image_path(self, image_id: str) -> str:

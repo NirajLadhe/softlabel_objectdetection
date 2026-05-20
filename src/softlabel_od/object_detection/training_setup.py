@@ -159,7 +159,7 @@ def build_train_sampler(cfg, train_dataset):
         print("Using balanced (RFS) sampling...")
         sampler = create_balanced_sampler(
             train_dataset,  # Pass original dataset
-            rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
+            rfs_threshold=cfg.DATA.RFS_THRESHOLD,
             downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
             indices=valid_indices if len(valid_indices) < len(all_indices) else None,
         )
@@ -264,7 +264,7 @@ def build_overfit_subset(cfg, train_dataset):
     num_needed = int(cfg.TRAIN.OVERFIT_BATCHES) * int(cfg.TRAIN.BATCH_SIZE)
     sampler = create_balanced_sampler(
         dataset_to_sample,
-        rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
+        rfs_threshold=cfg.DATA.RFS_THRESHOLD,
         downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
     )
     g = torch.Generator()

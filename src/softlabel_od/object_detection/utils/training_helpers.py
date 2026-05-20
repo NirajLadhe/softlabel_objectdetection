@@ -135,8 +135,7 @@ def summarize_balanced_sampler(
 
 def create_balanced_sampler(
     dataset,
-    rfs_threshold=0.01,
-    oversample_factor=None,
+    rfs_threshold=None,
     presence_prob_thresh=0.1,
     downweight_nofinding=False,
     alpha=0.5,
@@ -158,8 +157,7 @@ def create_balanced_sampler(
     Returns:
         WeightedRandomSampler
     """
-    if oversample_factor is not None:
-        rfs_threshold = oversample_factor
+    rfs_threshold = rfs_threshold if rfs_threshold is not None else 0.1
 
     img_ids = dataset.get_image_ids()
     # If indices provided, limit to those
@@ -178,16 +176,20 @@ def create_balanced_sampler(
 
     r_c = {}
     for c, cnt in cat_img_count.items():
+        if c <= 1:  # skip background and No Finding
+            continue
         f_c = cnt / max(1, N)
         ratio = rfs_threshold / max(f_c, 1e-12)
         r_c[c] = max(1.0, float(ratio ** alpha))
 
     weights = []
     for present in img_present:
-        if not present:
+        pathology_present = [c for c in present if c >= 2]
+        if not pathology_present:
+            # pure No Finding (class 1) and/or background-only — no RFS oversampling
             w = nofinding_weight if downweight_nofinding else 1.0
         else:
-            w = max(r_c[c] for c in present)
+            w = max(r_c[c] for c in pathology_present)
         weights.append(w)
 
     summarize_balanced_sampler(

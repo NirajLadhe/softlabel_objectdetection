@@ -23,14 +23,14 @@ def get_cfg_defaults():
     _C.DATA.GMM_TYPE = '1D'  # Choose between '1D' or '2D' or 'HARD_LABEL'
     _C.DATA.TEST_SPLIT_RATIO = 0.2
     _C.DATA.BALANCED_SAMPLER = True
-    _C.DATA.OVERSAMPLE_FACTOR = 1.0
+    _C.DATA.RFS_THRESHOLD = 0.25
     _C.DATA.IGNORE_NOFINDING_IMAGES = False  # Skip images with only no-finding clusters
     _C.DATA.DOWNWEIGHT_NOFINDING_IMAGES = False  # Downweight pure no-finding in balanced sampler
     _C.DATA.NOFINDING_INCLUDE_FRACTION = 1.0  # Fraction of pure no-finding images to include (0.0-1.0)
     _C.DATA.OPTIONS = CN(new_allowed=True)
     # Model settings
     _C.MODEL = CN()
-    _C.MODEL.NUM_CLASSES = 15  # 14 pathology classes + 1 background/no finding
+    _C.MODEL.NUM_CLASSES = 16  # 14 pathology classes + 1 background + 1 no finding
     _C.MODEL.BACKBONE = 'resnet50'
     _C.MODEL.PROBABILISTIC = True
     _C.MODEL.ROI_HEAD_BUFFER_FREQ_TERM = 'inverse' # Choose between "inverse", "inverse_sqrt"
@@ -50,6 +50,7 @@ def get_cfg_defaults():
     _C.TRAIN.OVERFIT_BATCHES = 5
     _C.TRAIN.NUM_EPOCHS = 30
     _C.TRAIN.EARLY_STOPPING = False
+    _C.TRAIN.MAP_EVAL_FREQ = 10  # compute val mAP every N epochs (and on final epoch)
 
     # Lightning-specific trainer knobs (do not duplicate TRAIN settings)
     _C.LIGHTNING = CN()

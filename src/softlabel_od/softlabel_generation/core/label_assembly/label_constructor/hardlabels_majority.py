@@ -92,23 +92,24 @@ def extract_majority_hard_labels(soft_labels, min_confidence=0.3):
         
         # Case 3: Majority voted for NoFindingInCluster (disputed case)
         if majority_class == 'NoFindingInCluster':
-            hard_label = {
-                'image_id': image_id,
-                'image_width': image_width,
-                'image_height': image_height,
-                'finding_id': finding_id,
-                'original_annotations': original_annotations,
-                'bbox': [0.0, 0.0, 1.0, 1.0],  # Placeholder bbox for No Finding
-                'class': 'No Finding',
-                'confidence': majority_confidence,
-                'extraction_method': 'majority_no_finding_disputed',
-                'original_class_probs': class_probs,
-                'renormalized_class_probs': {'No finding': class_probs['NoFindingInCluster']},
-                'num_annotations': num_annotations
-            }
+            # hard_label = {
+            #     'image_id': image_id,
+            #     'image_width': image_width,
+            #     'image_height': image_height,
+            #     'finding_id': finding_id,
+            #     'original_annotations': original_annotations,
+            #     'bbox': [0.0, 0.0, 1.0, 1.0],  # Placeholder bbox for No Finding
+            #     'class': 'No Finding',
+            #     'confidence': majority_confidence,
+            #     'extraction_method': 'majority_no_finding_disputed',
+            #     'original_class_probs': class_probs,
+            #     'renormalized_class_probs': {'No finding': class_probs['NoFindingInCluster']},
+            #     'num_annotations': num_annotations
+            # }
             
-            hard_labels.append(hard_label)
+            # hard_labels.append(hard_label)
             stats['majority_no_finding_disputed'] += 1
+            continue
         
         # Case 4: Majority voted for a pathology class
         else:
@@ -139,7 +140,7 @@ def extract_majority_hard_labels(soft_labels, min_confidence=0.3):
 
 def main():
     # File paths
-    project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))   
+    project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', '..'))   
     input_file = os.path.join(project_root_ext, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json')
     output_dir = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels')
     output_file = os.path.join(output_dir, 'HardLabels_MajorityVote_iou0_5.json')

@@ -144,7 +144,7 @@ class DetectionLightningDataModule(pl.LightningDataModule):
             print("Using balanced (RFS) sampling...")
             sampler = create_balanced_sampler(
                 train_dataset,
-                rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
+                rfs_threshold=cfg.DATA.RFS_THRESHOLD,
                 downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
                 indices=valid_indices if len(valid_indices) < len(all_indices) else None,
             )
@@ -241,7 +241,7 @@ class DetectionLightningDataModule(pl.LightningDataModule):
         # Create sampler over filtered indices
         sampler = create_balanced_sampler(
             train_dataset,
-            rfs_threshold=cfg.DATA.OVERSAMPLE_FACTOR,
+            rfs_threshold=cfg.DATA.RFS_THRESHOLD,
             downweight_nofinding=cfg.DATA.DOWNWEIGHT_NOFINDING_IMAGES,
             indices=valid_indices if len(valid_indices) < len(all_indices) else None,
         )
