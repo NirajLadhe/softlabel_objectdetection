@@ -50,6 +50,7 @@ softlabel-train = "softlabel_od.scripts.train:main"
 softlabel-train-lightning = "softlabel_od.scripts.train_lightning:main"
 softlabel-pipeline = "softlabel_od.scripts.run_pipeline:main"
 softlabel-evaluate = "softlabel_od.scripts.evaluate:main"
+softlabel-infer-kaggle = "softlabel_od.scripts.infer_kaggle:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
