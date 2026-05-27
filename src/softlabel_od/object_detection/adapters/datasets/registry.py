@@ -31,7 +31,7 @@ def get_dataset_class(name: str):
     return DATASET_REGISTRY[normalized_name]
 
 
-def build_detection_dataset(cfg, train: bool, transforms=None):
+def build_detection_dataset(cfg, split: str = "train", transforms=None):
     dataset_name = getattr(cfg.DATA, "DATASET", "vindrcxr")
     dataset_cls = get_dataset_class(dataset_name)
     options = cfg_node_to_dict(getattr(cfg.DATA, "OPTIONS", {}))
@@ -39,8 +39,9 @@ def build_detection_dataset(cfg, train: bool, transforms=None):
         root=cfg.DATA.ROOT,
         label_file=resolve_label_file(cfg),
         transforms=transforms,
-        train=train,
+        split=split,
         test_split_ratio=cfg.DATA.TEST_SPLIT_RATIO,
+        val_split_ratio=getattr(cfg.DATA, "VAL_SPLIT_RATIO", 0.2),
         label_mode=resolve_label_mode(cfg),
         **options,
     )

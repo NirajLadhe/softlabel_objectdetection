@@ -12,7 +12,7 @@ import json
 import os
 from abc import abstractmethod
 from collections import Counter
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Literal
 
 import numpy as np
 import torch
@@ -22,6 +22,8 @@ from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 from softlabel_od.object_detection.ports.dataset_port import DetectionDatasetPort
 from softlabel_od.object_detection.utils.training_helpers import load_rater_weights
 from softlabel_od.object_detection.utils.config import get_cfg_defaults
+
+SplitName = Literal["train", "val", "test"]
 
 cfg = get_cfg_defaults()
 NO_FINDING_KEYS = {
@@ -78,20 +80,22 @@ def label_mode_to_legacy_fields(label_mode: str) -> tuple[str, str | None]:
         return "soft", "2D"
     raise ValueError(f"Unsupported label mode: {label_mode}")
 
-
 class CanonicalDetectionDataset(DetectionDatasetPort):
     """
     Shared implementation for datasets that consume canonical hard/soft label
     JSON files and return Faster R-CNN compatible targets.
     """
+    _SPLIT_CACHE: dict[tuple, tuple[list[str], list[str], list[str]]] = {}
 
     def __init__(
         self,
         root: str,
         label_file: str,
         transforms=None,
-        train: bool = True,
+        split: SplitName = "train",
+        train: bool | None = None,          # backward compat; prefer `split`
         test_split_ratio: float = 0.2,
+        val_split_ratio: float = 0.2,
         label_mode: str | None = None,
         dataset_type: str | None = None,
         gmm_type: str | None = None,
@@ -100,9 +104,15 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         placeholder_tolerance: float = 0.01,
     ):
         self.root = root
+        self._label_file = os.path.abspath(label_file)
         self.transforms = transforms
-        self.train = train
+        if train is not None:
+            split = "train" if train else "val"
+        if split not in ("train", "val", "test"):
+            raise ValueError(f"split must be 'train', 'val', or 'test', got {split!r}")
+        self.split = split
         self.test_split_ratio = test_split_ratio
+        self.val_split_ratio = val_split_ratio
         self.ignore_nofinding_clusters = ignore_nofinding_clusters
         self.placeholder_tolerance = placeholder_tolerance
 
@@ -125,9 +135,10 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         print(f"Loaded {len(raw_labels)} label entries")
 
         self._image_data = self.group_records_by_image(raw_labels)
-        train_ids, val_ids = self.create_stratified_split()
-        self._image_ids = train_ids if self.train else val_ids
-        split_name = "Training" if self.train else "Validation"
+        train_ids, val_ids, test_ids = self.create_stratified_splits()
+        split_map = {"train": train_ids, "val": val_ids, "test": test_ids}
+        self._image_ids = split_map[self.split]
+        split_name = {"train": "Training", "val": "Validation", "test": "Test"}[self.split]
         print(f"{split_name} set: {len(self._image_ids)} images")
 
     @property
@@ -459,7 +470,20 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             print(f"[RoI head weights] Weights: {weights}")
         return weights
 
-    def create_stratified_split(self, presence_prob_thresh: float = 0.1) -> tuple[List[str], List[str]]:
+    def create_stratified_splits(
+        self,
+        presence_prob_thresh: float = 0.1,
+        random_state: int = 42,
+    ) -> tuple[list[str], list[str], list[str]]:
+        cache_key = (
+            self._label_file,
+            self.test_split_ratio,
+            self.val_split_ratio,
+            random_state,
+        )
+        if cache_key in CanonicalDetectionDataset._SPLIT_CACHE:
+            return CanonicalDetectionDataset._SPLIT_CACHE[cache_key]
+
         all_image_ids = list(self.image_data.keys())
         n_images = len(all_image_ids)
         num_classes = self.get_num_classes()
@@ -473,16 +497,37 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                 for class_idx in present:
                     y[row_idx, class_idx] = 1
 
-        splitter = MultilabelStratifiedShuffleSplit(
-            n_splits=1,
-            test_size=self.test_split_ratio,
-            random_state=42, # DO NOT CHANGE THIS VALUE TO MAINTAIN REPRODUCIBILITY
-        )
         x_dummy = np.zeros((n_images, 1), dtype=np.int32)
-        train_idx, val_idx = next(splitter.split(x_dummy, y))
-        train_ids = [all_image_ids[index] for index in train_idx]
-        val_ids = [all_image_ids[index] for index in val_idx]
-        return train_ids, val_ids
+
+        # Stage 1: lock away test set (same seed/ratio as the old 80/20 split)
+        dev_idx, test_idx = next(
+            MultilabelStratifiedShuffleSplit(
+                n_splits=1,
+                test_size=self.test_split_ratio,
+                random_state=random_state,
+            ).split(x_dummy, y)
+        )
+
+        # Stage 2: split development pool into train / val
+        dev_y = y[dev_idx]
+        dev_x = x_dummy[dev_idx]
+        train_rel_idx, val_rel_idx = next(
+            MultilabelStratifiedShuffleSplit(
+                n_splits=1,
+                test_size=self.val_split_ratio,
+                random_state=random_state,
+            ).split(dev_x, dev_y)
+        )
+
+        train_idx = dev_idx[train_rel_idx]
+        val_idx = dev_idx[val_rel_idx]
+
+        train_ids = [all_image_ids[i] for i in train_idx]
+        val_ids = [all_image_ids[i] for i in val_idx]
+        test_ids = [all_image_ids[i] for i in test_idx]
+
+        CanonicalDetectionDataset._SPLIT_CACHE[cache_key] = (train_ids, val_ids, test_ids)
+        return train_ids, val_ids, test_ids
 
     def build_image_id_tensor(self, image_id: str) -> torch.Tensor:
         return torch.tensor([hash(image_id) % (2**31)])

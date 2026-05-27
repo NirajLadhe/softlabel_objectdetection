@@ -29,106 +29,47 @@ METRIC_RUNNERS = {
 
 
 def evaluate(args):
+    cfg = get_cfg_from_file(args.config)
+    
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
     print(f"Device: {device}")
 
-    cfg = get_cfg_from_file(args.config)
     is_hard = args.gmm_type == "HARD_LABEL"
     probabilistic = not is_hard
     label_mode = "hard" if is_hard else f"soft_{args.gmm_type.lower()}"
 
-    print(f"\nCreating {label_mode} validation dataset...")
+    print(f"\nCreating {label_mode} test dataset...")
     dataset_cls = get_dataset_class(args.dataset)
-    val_dataset = dataset_cls(
+    test_dataset = dataset_cls(
         root=args.data_root,
         label_file=args.label_file,
         transforms=Compose([ToTensor()]),
-        train=False,
+        split="test",
         test_split_ratio=args.test_split_ratio,
+        val_split_ratio=args.val_split_ratio,
         label_mode=label_mode,
     )
-
-    # Apply no-finding filtering/sampling for evaluation
-    all_indices = list(range(len(val_dataset)))
-    valid_indices = all_indices
-    
-    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
-        print("Filtering pure No-Finding images (healthy CXR) from validation set...")
-        valid_indices = [
-            idx for idx in all_indices
-            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx])
-        ]
-    elif cfg.DATA.NOFINDING_INCLUDE_FRACTION < 1.0:
-        fraction = cfg.DATA.NOFINDING_INCLUDE_FRACTION
-        print(f"Sampling {fraction*100:.1f}% of pure No-Finding images for validation...")
-        
-        pathology_indices = []
-        nofinding_indices = []
-        for idx in all_indices:
-            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx]):
-                pathology_indices.append(idx)
-            else:
-                nofinding_indices.append(idx)
-        
-        if nofinding_indices:
-            np.random.seed(42)
-            n_nofinding_to_keep = int(len(nofinding_indices) * fraction)
-            sampled_nofinding = np.random.choice(
-                nofinding_indices, 
-                size=n_nofinding_to_keep, 
-                replace=False
-            ).tolist()
-            valid_indices = pathology_indices + sampled_nofinding
-            valid_indices.sort()
-        else:
-            valid_indices = pathology_indices
-        
-        print(f"  Validation: {len(pathology_indices)} pathology + {len(sampled_nofinding if nofinding_indices else [])} no-finding = {len(valid_indices)} total")
-    
-    if len(valid_indices) < len(all_indices):
-        from torch.utils.data import Subset
-        val_dataset = Subset(val_dataset, valid_indices)
-
-    # Filter out pure no-finding images if configured
-    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
-        print("Filtering pure No-Finding images (healthy CXR) from validation set...")
-        valid_indices = [
-            idx for idx in range(len(val_dataset))
-            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx])
-        ]
-        kept = len(valid_indices)
-        total = len(val_dataset)
-        print(f"  Kept {kept}/{total} images ({kept/total*100:.1f}% have pathology).")
-        from torch.utils.data import Subset
-        val_dataset = Subset(val_dataset, valid_indices)
-
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
         batch_size=args.batch_size,
         shuffle=False,
         collate_fn=collate_fn,
         num_workers=args.num_workers,
     )
-    print(f"Validation set: {len(val_dataset)} images")
+    print(f"Test set: {len(test_dataset)} images")
+    class_names = test_dataset.class_names
+    model = load_model(
+        weights_path=args.weights,
+        num_classes=args.num_classes,
+        model_type=args.gmm_type,
+        backbone=args.backbone,
+        probabilistic=probabilistic,
+        device=device,
+        anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS * len(cfg.MODEL.ANCHOR_SIZES),
+    )
 
-    # Handle class_names for both original dataset and Subset wrapper
-    if hasattr(val_dataset, 'class_names'):
-        class_names = val_dataset.class_names
-    else:
-        # Subset wrapper - access underlying dataset
-        class_names = val_dataset.dataset.class_names
-
-    print(f"\nLoading model from: {args.weights}")
-    model = load_model(weights_path=args.weights, 
-    num_classes=args.num_classes, 
-    model_type=args.gmm_type,
-    backbone=args.backbone, 
-    probabilistic=probabilistic, 
-    device=device,
-    anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
-    anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS*len(cfg.MODEL.ANCHOR_SIZES))
-
-    predictions, ground_truths = collect_predictions(model, val_loader, device=device, is_probabilistic=probabilistic)
+    predictions, ground_truths = collect_predictions(model, test_loader, device=device, is_probabilistic=probabilistic)
     print(f"Collected predictions for {len(predictions)} images")
 
     selected_metrics = (
@@ -198,10 +139,13 @@ def main():
     parser.add_argument("--num-classes", type=int, default=16)
     parser.add_argument("--backbone", type=str, default="resnet50", choices=["resnet50", "resnet101", "mobilenet"])
     parser.add_argument("--test-split-ratio", type=float, default=0.20)
+    parser.add_argument("--val-split-ratio", type=float, default=0.20)
     parser.add_argument("--num-workers", type=int, default=None, help="Number of workers for dataloader (0 = single-process)")
     parser.add_argument("--cpu", action="store_true")
     args = parser.parse_args()
 
+    cfg = get_cfg_from_file(args.config)
+    
     # Handle default values for num_workers
     if args.num_workers is None:
         if args.metric_type in ["pdq"]:
@@ -239,6 +183,12 @@ def main():
             args.priors_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/priors/class_priors_1d_iou0_5.json")
         elif args.gmm_type == "HARD_LABEL":
             pass
+    
+    # Handle default values for test and val split ratio
+    if args.test_split_ratio is None:
+        args.test_split_ratio = cfg.DATA.TEST_SPLIT_RATIO
+    if args.val_split_ratio is None:
+        args.val_split_ratio = cfg.DATA.VAL_SPLIT_RATIO
 
     evaluate(args)
 
