@@ -20,8 +20,11 @@ from softlabel_od.object_detection.adapters.datasets.vindrcxr import (
     Vin_Dr_CXR_SoftLabel_Dataset,
 )
 
+from softlabel_od.object_detection.adapters.datasets.nucls import NuCLSDataset
+
 register_dataset("vindrcxr", Vin_Dr_CXR_SoftLabel_Dataset)
 register_dataset("vindr-cxr", Vin_Dr_CXR_SoftLabel_Dataset)
+register_dataset("nucls", NuCLSDataset)
 
 __all__ = [
     "Vin_Dr_CXR_SoftLabel_Dataset",
@@ -29,4 +32,5 @@ __all__ = [
     "build_detection_dataset",
     "get_dataset_class",
     "register_dataset",
+    "NuCLSDataset",
 ]
