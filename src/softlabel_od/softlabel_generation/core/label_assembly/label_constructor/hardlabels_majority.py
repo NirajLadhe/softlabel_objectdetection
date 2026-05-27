@@ -82,6 +82,10 @@ def extract_majority_hard_labels(soft_labels, min_confidence=0.3):
             continue
         
         # Case 2: Use majority vote from class probabilities
+        # Guard: skip clusters with empty class_probs (spatial=None records)
+        if not class_probs:
+            stats['low_confidence_excluded'] += 1
+            continue
         majority_class = max(class_probs.keys(), key=class_probs.get)
         majority_confidence = class_probs[majority_class]
         
@@ -141,9 +145,10 @@ def extract_majority_hard_labels(soft_labels, min_confidence=0.3):
 def main():
     # File paths
     project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', '..'))   
-    input_file = os.path.join(project_root_ext, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json')
-    output_dir = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels')
-    output_file = os.path.join(output_dir, 'HardLabels_MajorityVote_iou0_5.json')
+    # input_file = os.path.join(project_root_ext, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json')
+    input_file = os.path.join(project_root_ext, 'outputs/nucls/1d_gaussian_softlabels/1DGMM_softLabels_iou0_25_with_priors.json')
+    output_dir = os.path.join(project_root_ext, 'outputs/nucls/hard_labels')
+    output_file = os.path.join(output_dir, 'HardLabels_MajorityVote_iou0_25.json')
     
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
