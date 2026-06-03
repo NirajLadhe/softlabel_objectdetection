@@ -79,9 +79,9 @@ class DetectionLightningDataModule(pl.LightningDataModule):
     def build_datasets(self, cfg):
         train_transform, val_transform = self.build_transforms(cfg)
         print("Initialising training dataset...")
-        train_dataset = build_detection_dataset(cfg, train=True, transforms=train_transform)
+        train_dataset = build_detection_dataset(cfg, split="train", transforms=train_transform)
         print("Initialising validation dataset...")
-        val_dataset = build_detection_dataset(cfg, train=False, transforms=val_transform)
+        val_dataset = build_detection_dataset(cfg, split="val", transforms=val_transform)
         return train_dataset, val_dataset
     
     # TRAIN LOADER

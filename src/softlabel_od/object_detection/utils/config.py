@@ -21,7 +21,8 @@ def get_cfg_defaults():
     _C.DATA.SOFT_LABEL_FILE_2D = os.path.join(project_root_ext, 'outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json')
     _C.DATA.HARD_LABEL_FILE = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json')
     _C.DATA.GMM_TYPE = '1D'  # Choose between '1D' or '2D' or 'HARD_LABEL'
-    _C.DATA.TEST_SPLIT_RATIO = 0.2
+    _C.DATA.TEST_SPLIT_RATIO = 0.2 # For evaluation only
+    _C.DATA.VAL_SPLIT_RATIO = 0.2 # For training and validation
     _C.DATA.BALANCED_SAMPLER = True
     _C.DATA.RFS_THRESHOLD = 0.25
     _C.DATA.IGNORE_NOFINDING_IMAGES = False  # Skip images with only no-finding clusters

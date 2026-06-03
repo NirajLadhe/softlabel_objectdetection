@@ -74,9 +74,9 @@ def build_datasets(cfg):
     """
     train_transform, val_transform = build_transforms(cfg)
     print("Initialising training dataset...")
-    train_dataset = build_detection_dataset(cfg, train=True, transforms=train_transform)
+    train_dataset = build_detection_dataset(cfg, split="train", transforms=train_transform)
     print("Initialising validation dataset...")
-    val_dataset = build_detection_dataset(cfg, train=False, transforms=val_transform)
+    train_dataset = build_detection_dataset(cfg, split="train", transforms=train_transform)
     return train_dataset, val_dataset
 
 
