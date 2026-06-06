@@ -65,8 +65,8 @@ def evaluate(args):
         backbone=args.backbone,
         probabilistic=probabilistic,
         device=device,
-        anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
-        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS * len(cfg.MODEL.ANCHOR_SIZES),
+        # anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+        # anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS * len(cfg.MODEL.ANCHOR_SIZES),
     )
 
     predictions, ground_truths = collect_predictions(model, test_loader, device=device, is_probabilistic=probabilistic)

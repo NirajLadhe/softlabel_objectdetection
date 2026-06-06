@@ -247,21 +247,25 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
     def build_class_prob_vector(self, class_probs: Dict[str, float] | None) -> torch.Tensor:
         prob_vector = torch.zeros(self.get_num_classes(), dtype=torch.float32)
+        no_finding_idx = self.class_to_idx.get("No Finding", 1)
+
         for class_name, prob in (class_probs or {}).items():
-            if class_name in self.class_to_idx:
-                prob_vector[self.class_to_idx[class_name]] += float(prob)
-            elif self.is_nofinding_key(class_name):
-                if "No Finding" in self.class_to_idx:
-                    prob_vector[self.class_to_idx["No Finding"]] += float(prob)
-                else:
-                    prob_vector[0] += float(prob)
-            elif class_name in BACKGROUND_KEYS:
-                prob_vector[0] += float(prob)
+            prob = float(prob)
+
+            if class_name in BACKGROUND_KEYS:
+                prob_vector[0] += prob
+            elif class_name == "NoFindingInCluster" or self.is_nofinding_key(class_name):
+                prob_vector[no_finding_idx] += prob
+            elif class_name in self.class_to_idx:
+                cls_idx = self.class_to_idx[class_name]
+                prob_vector[cls_idx] += prob
+
         prob_sum = prob_vector.sum()
         if prob_sum > 0:
             prob_vector = prob_vector / prob_sum
         else:
             prob_vector[0] = 1.0
+
         return prob_vector
 
     def get_presence_labels(self, image_id: str, threshold: float = 0.1) -> Set[int]:
@@ -455,10 +459,9 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             weights[disease_classes] = weights[disease_classes] / mean_weight
         weights = weights.clamp(max=max_weight)
         weights[0] = 1.0
-
         # Explicitly set No Finding weight to 1.0
         if "No Finding" in self.class_to_idx:
-            weights[self.class_to_idx["No Finding"]] = 0.1
+            weights[self.class_to_idx["No Finding"]] = 0.5
 
         if verbose:
             reverse_mapping = {idx: name for name, idx in self.class_to_idx.items()}
@@ -633,7 +636,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             # if not mean_box or not std_box or self.is_placeholder_mean_box(mean_box):
             #     continue
             # REMOVED: self.is_placeholder_mean_box(mean_box)
-            if not mean_box or not std_box:
+            if not mean_box or not std_box or self.is_placeholder_mean_box(mean_box):
                 continue
 
             if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) <= 1:
