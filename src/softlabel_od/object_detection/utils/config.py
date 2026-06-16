@@ -37,6 +37,7 @@ def get_cfg_defaults():
     _C.MODEL.ROI_HEAD_BUFFER_MAX_WEIGHT = 15.0 # Maximum weight for the buffer
     _C.MODEL.ANCHOR_SIZES = [[32], [64], [128], [256], [512]]
     _C.MODEL.ANCHOR_ASPECT_RATIOS = [[0.33, 0.5, 0.75, 1.0, 2.0, 3.0]]
+    _C.MODEL.ARCHITECTURE = ''  # Optional override: 'lvis_1d', 'vindr_1d', etc.
     # Training settings
     _C.TRAIN = CN()
     _C.TRAIN.BASE_LR_BBOX = 0.005
@@ -50,6 +51,7 @@ def get_cfg_defaults():
     _C.TRAIN.OVERFIT_BATCHES = 5
     _C.TRAIN.NUM_EPOCHS = 30
     _C.TRAIN.EARLY_STOPPING = False
+    _C.TRAIN.GRADIENT_CLIP_VAL = 5.0   # max grad norm; raise for large-class-count heads
 
     # Lightning-specific trainer knobs (do not duplicate TRAIN settings)
     _C.LIGHTNING = CN()

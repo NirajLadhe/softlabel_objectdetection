@@ -24,8 +24,9 @@ class ProbabilisticFastRCNNPredictor(nn.Module):
     Args:
         in_channels (int): number of input channels
         num_classes (int): number of output classes (including background)
+        log_var_bias (float): initial bias for log-variance branch
     """
-    def __init__(self, in_channels, num_classes):
+    def __init__(self, in_channels, num_classes, log_var_bias=-4.0):
         super(ProbabilisticFastRCNNPredictor, self).__init__()
         self.cls_score = nn.Linear(in_channels, num_classes)
         # The regression head now outputs 8 values per class: 4 for mean, 4 for log-variance
@@ -38,7 +39,7 @@ class ProbabilisticFastRCNNPredictor(nn.Module):
         # Reshape bias to [num_classes, 8] to index easily
         with torch.no_grad():
             bias = self.bbox_pred_gmm.bias.view(num_classes, 8)
-            bias[:, 4:] = -4.0 
+            bias[:, 4:] = log_var_bias 
             self.bbox_pred_gmm.bias.copy_(bias.view(-1))
 
     def forward(self, x):
@@ -172,7 +173,7 @@ class ProbabilisticRoIHeads(RoIHeads):
             # -----------------------------
             # 5a) Smooth L1 loss on means (direct localization anchor)
             # -----------------------------
-            LAMBDA_MEAN = 2.0
+            LAMBDA_MEAN = getattr(self, "lambda_mean", 2.0)
             loss_box_mean = torch.nn.functional.smooth_l1_loss(
                 pred_means_delta,
                 pos_reg_targets,
@@ -191,7 +192,7 @@ class ProbabilisticRoIHeads(RoIHeads):
             pred_log_stds = 0.5 * pred_log_vars_delta                       # [N_pos, 4]
             gt_log_stds = torch.log(gt_stds_delta_safe)                      # [N_pos, 4]
             
-            LAMBDA_VAR = 1.0
+            LAMBDA_VAR = getattr(self, "lambda_var", 1.0)
             loss_box_var = torch.nn.functional.smooth_l1_loss(
                 pred_log_stds,
                 gt_log_stds,
@@ -199,37 +200,60 @@ class ProbabilisticRoIHeads(RoIHeads):
                 reduction="mean",
             ) * LAMBDA_VAR
             # -----------------------------
-            # 6) Classification loss = soft cross entropy
+            # 6) Classification loss = soft cross entropy over ALL proposals
+            # (positive + negative)
             # -----------------------------
-            gt_class_probs_list = []
-            for i in range(len(targets)):
-                pos_mask = labels[i] > 0
-                if pos_mask.sum() == 0:
-                    continue
-                gt_idx_i = matched_idxs[i][pos_mask]
-                gt_class_probs_list.append(targets[i]["gt_class_probs"][gt_idx_i])
+            # FIX: The original code only computed classification loss on positive
+            # proposals (those overlapping a real GT box). This meant the model
+            # received ZERO gradient signal for background proposals — it was never
+            # penalised for wrongly predicting a layout class on empty page space.
+            # That is the direct cause of the extreme false-positive count (>18k FPs).
+            #
+            # Standard Faster R-CNN trains the classifier on all sampled proposals:
+            #   • Negatives (label == 0) → target is hard background: [1, 0, 0, …]
+            #   • Positives (label > 0)  → target is the GMM soft distribution
+            #
+            # We build a full [N_total, C] target matrix, initialise every row to
+            # "100 % background", then overwrite only the positive rows with their
+            # soft GMM targets. Annotation weights for negative proposals stay at 1.0
+            # (they have no annotator uncertainty). This adds a single tensor
+            # construction step; no architectural change is required.
 
-            gt_class_probs = torch.cat(gt_class_probs_list, dim=0)  # [N_pos, C]
+            num_total = all_labels.shape[0]
 
-            pos_ann_weights_list = []
-            for i in range(len(targets)):
-                pos_mask = labels[i] > 0
-                if pos_mask.sum() == 0:
-                    continue
-                gt_idx_i = matched_idxs[i][pos_mask]
-                pos_ann_weights_list.append(targets[i]['annotation_weight'][gt_idx_i])
+            # 6a) Initialise all proposals as hard background
+            cls_targets = class_logits.new_zeros((num_total, num_classes))
+            cls_targets[:, 0] = 1.0          # 100 % background by default
 
-            pos_ann_weights = torch.cat(pos_ann_weights_list, dim=0)  # [N_pos]
+            # 6b) Per-proposal annotation weights (1.0 for negatives)
+            ann_weights = class_logits.new_ones(num_total)
 
-            LAMBDA_CLS = 1.0
-            # loss_classifier = soft_cross_entropy_loss(pos_class_logits, gt_class_probs, class_weights=self.class_weights)
-            # Weighted-Annotator Cross Entropy Loss: single annotator cluster get smaller gradient than multi-annotator cluster
+            # 6c) Overwrite positive rows with soft GMM targets + annotator weights
+            if num_pos > 0:
+                pos_gt_class_probs_list = []
+                pos_ann_weights_list = []
+                for i in range(len(targets)):
+                    pos_mask = labels[i] > 0
+                    if pos_mask.sum() == 0:
+                        continue
+                    gt_idx_i = matched_idxs[i][pos_mask]
+                    pos_gt_class_probs_list.append(targets[i]["gt_class_probs"][gt_idx_i])
+                    pos_ann_weights_list.append(targets[i]["annotation_weight"][gt_idx_i])
+
+                pos_gt_class_probs = torch.cat(pos_gt_class_probs_list, dim=0)  # [N_pos, C]
+                pos_ann_weights    = torch.cat(pos_ann_weights_list,    dim=0)  # [N_pos]
+
+                cls_targets[positive_proposals_indices] = pos_gt_class_probs
+                ann_weights[positive_proposals_indices] = pos_ann_weights
+
+            # 6d) Soft cross-entropy over all N_total proposals, weighted by annotator confidence
+            LAMBDA_CLS = getattr(self, "lambda_cls", 1.0)
             per_sample_ce = soft_cross_entropy_loss(
-                pos_class_logits, gt_class_probs,
+                class_logits, cls_targets,
                 class_weights=self.class_weights,
-                reduction='none'        # [N_pos]
+                reduction="none",   # [N_total]
             )
-            loss_classifier = (per_sample_ce * pos_ann_weights).mean() * LAMBDA_CLS
+            loss_classifier = (per_sample_ce * ann_weights).mean() * LAMBDA_CLS
 
             # -----------------------------
             # 7) Final losses
@@ -351,10 +375,14 @@ class ProbabilisticRoIHeads(RoIHeads):
                 labels_flat = labels_flat.view(1, -1).expand(boxes_i.shape[0], -1).reshape(-1)
                 
                 
-                # Stage 1: gate on foreground confidence — one test per proposal
-                fg_confidence = 1.0 - scores_i_full[:, 0]       # [num_proposals]
-                fg_mask = fg_confidence > self.score_thresh      # score_thresh=0.5
-
+                # Stage 1: gate on pathology confidence vs no-finding confidence
+                pathology_scores = scores_i_full[:, 2:]  # indices 2-15
+                max_pathology_score = pathology_scores.max(dim=-1).values
+                pathology_mask = max_pathology_score > self.score_thresh
+                nofinding_score = scores_i_full[:, 1]
+                # A proposal is a No Finding prediction if its No Finding score is high and it's not a pathology
+                nofinding_mask = (nofinding_score > self.score_thresh) & ~pathology_mask
+                fg_mask = pathology_mask | nofinding_mask
                 if fg_mask.sum() == 0:
                     result.append({
                         "boxes":       torch.empty((0, 4), device=gmm_params.device),
@@ -364,26 +392,35 @@ class ProbabilisticRoIHeads(RoIHeads):
                         "class_probs": torch.empty((0, num_classes), device=gmm_params.device),
                     })
                     continue
-
                 # Filter all per-proposal tensors
                 boxes_fg    = boxes_i[fg_mask]           # [M, C-1, 4]
                 stds_fg     = stds_i[fg_mask]            # [M, C-1, 4]
                 scores_fg   = scores_i[fg_mask]          # [M, C-1]
-                fg_conf_fg  = fg_confidence[fg_mask]     # [M]
                 full_probs_fg = scores_i_full[fg_mask]   # [M, num_classes]
-
                 # Stage 2: pick MAP class label per surviving proposal
-                map_class_idx = scores_fg.argmax(dim=-1)         # [M], 0-indexed over fg classes
-                labels_out    = map_class_idx + 1                # shift to 1-indexed
-
-                M   = boxes_fg.shape[0]
+                is_pathology = pathology_mask[fg_mask]
+                M = boxes_fg.shape[0]
+                
+                map_class_idx = torch.zeros(M, dtype=torch.long, device=scores_fg.device)
+                
+                # For pathology proposals, argmax over pathology classes (indices 1 to C-1 in scores_fg)
+                if is_pathology.any():
+                    path_idx = scores_fg[is_pathology, 1:].argmax(dim=-1) + 1
+                    map_class_idx[is_pathology] = path_idx
+                
+                # For nofinding proposals, class is 0 in scores_fg
+                if (~is_pathology).any():
+                    map_class_idx[~is_pathology] = 0
+                
+                labels_out = map_class_idx + 1
+                fg_conf_fg = scores_fg.gather(1, map_class_idx.unsqueeze(-1)).squeeze(-1)
                 idx = map_class_idx.unsqueeze(-1).unsqueeze(-1)  # [M, 1, 1]
                 boxes_out = boxes_fg.gather(1, idx.expand(-1, -1, 4)).squeeze(1)   # [M, 4]
                 stds_out  = stds_fg.gather(1, idx.expand(-1, -1, 4)).squeeze(1)    # [M, 4]
-
                 # Stage 3: NMS on foreground confidence
                 keep = torchvision.ops.nms(boxes_out, fg_conf_fg, self.nms_thresh)
                 keep = keep[:self.detections_per_img]
+
 
                 result.append({
                     "boxes":       boxes_out[keep],
@@ -445,8 +482,11 @@ class HardLabelRoIHeads(RoIHeads):
             # Build one-hot targets for soft_focal_loss
             # gt_class_probs = torch.nn.functional.one_hot(labels.clamp_min(0), num_classes=class_logits.shape[1]).float()
             
-            LAMBDA_CLS = 10.0
-            loss_classifier = torch.nn.functional.cross_entropy(class_logits, labels) * LAMBDA_CLS
+            LAMBDA_CLS = getattr(self, "lambda_cls", 2.0)
+            # class_weights = getattr(self, "class_weights", None)
+            # class_weights = class_weights.to(device = class_logits.device, dtype = class_logits.dtype) if class_weights is not None else None
+
+            loss_classifier = torch.nn.functional.cross_entropy(class_logits, labels, weight=self.class_weights, reduction='none').mean() * LAMBDA_CLS
             
             # Regression Loss (Smooth L1 Loss)
             sampled_pos_inds_subset = torch.where(labels > 0)[0]
@@ -454,7 +494,7 @@ class HardLabelRoIHeads(RoIHeads):
             N = class_logits.shape[0]
             box_regression = box_regression.reshape(N, -1, 4)
             
-            LAMBDA_BOX_REG = 5.0
+            LAMBDA_BOX_REG = getattr(self, "lambda_box_reg", 4.0)
             loss_box_reg = torch.nn.functional.smooth_l1_loss(
                 box_regression[sampled_pos_inds_subset, labels_pos],
                 regression_targets[sampled_pos_inds_subset],

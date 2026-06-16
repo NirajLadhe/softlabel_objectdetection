@@ -471,7 +471,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         return torch.tensor([hash(image_id) % (2**31)])
 
     def get_record_image_size(self, records: List[Dict[str, Any]], image) -> tuple[int, int]:
-        if records and "image_width" in records[0] and "image_height" in records[0]:
+        if records and records[0].get("image_width") is not None and records[0].get("image_height") is not None:
             return int(records[0]["image_width"]), int(records[0]["image_height"])
         return image.size
 

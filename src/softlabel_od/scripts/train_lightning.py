@@ -65,6 +65,7 @@ def _get_history_logger(label_mode: str, cfg):
 def main():
     parser = argparse.ArgumentParser(description="Train model (PyTorch Lightning)")
     parser.add_argument("--config", type=str, default=DEFAULT_CONFIG)
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
     args = parser.parse_args()
 
     cfg = get_cfg_from_file(args.config)
@@ -122,7 +123,7 @@ def main():
         enable_progress_bar=cfg.LIGHTNING.ENABLE_PROGRESS_BAR,
         deterministic=cfg.LIGHTNING.DETERMINISTIC,
         precision=cfg.LIGHTNING.PRECISION,
-        gradient_clip_val=5.0,
+        gradient_clip_val=cfg.TRAIN.GRADIENT_CLIP_VAL,
         gradient_clip_algorithm="norm",
         # Overfit is handled at the DataModule level, not here.
         # Leave overfit_batches=0 so Lightning doesn't override the dataloader.
@@ -130,7 +131,7 @@ def main():
         num_sanity_val_steps=cfg.LIGHTNING.NUM_SANITY_VAL_STEPS,
     )
 
-    trainer.fit(model, datamodule=dm)
+    trainer.fit(model, datamodule=dm, ckpt_path=args.resume)
 
 
 if __name__ == "__main__":

@@ -315,7 +315,8 @@ def build_model(cfg, model_type: str, device=None):
         pretrained=True,
         probabilistic=cfg.MODEL.PROBABILISTIC,
         anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
-        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS
+        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
+        architecture=getattr(cfg.MODEL, 'ARCHITECTURE', None) or None,
     )
     if device is not None:
         model.to(device)

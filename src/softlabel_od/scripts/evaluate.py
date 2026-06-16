@@ -118,15 +118,18 @@ def evaluate(args):
         # Subset wrapper - access underlying dataset
         class_names = val_dataset.dataset.class_names
 
+    architecture = getattr(cfg.MODEL, 'ARCHITECTURE', None) or None
     print(f"\nLoading model from: {args.weights}")
-    model = load_model(weights_path=args.weights, 
-    num_classes=args.num_classes, 
+    print(f"Architecture: {architecture or args.gmm_type}")
+    model = load_model(weights_path=args.weights,
+    num_classes=args.num_classes,
     model_type=args.gmm_type,
-    backbone=args.backbone, 
-    probabilistic=probabilistic, 
+    backbone=args.backbone,
+    probabilistic=probabilistic,
     device=device,
     anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
-    anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS*len(cfg.MODEL.ANCHOR_SIZES))
+    anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS*len(cfg.MODEL.ANCHOR_SIZES),
+    architecture=architecture)
 
     predictions, ground_truths = collect_predictions(model, val_loader, device=device, is_probabilistic=probabilistic)
     print(f"Collected predictions for {len(predictions)} images")

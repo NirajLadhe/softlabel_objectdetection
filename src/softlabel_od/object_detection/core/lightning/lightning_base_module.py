@@ -14,7 +14,7 @@ Subclasses implement training_step / validation_step / on_validation_epoch_end.
 
 import torch
 import pytorch_lightning as pl
-from torch.optim.lr_scheduler import LambdaLR, MultiStepLR, CosineAnnealingLR
+from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
 from softlabel_od.object_detection.core.model.factory import get_model
 from softlabel_od.object_detection.utils.training_helpers import (
     load_pretrained_weights,
@@ -35,7 +35,6 @@ class BaseDetectionLightningModule(pl.LightningModule):
         self.cfg = cfg
         self.model_type = model_type
         self._model_configured = False
-        self._warmup_iters = None
         self.model = get_model(
             num_classes=cfg.MODEL.NUM_CLASSES,
             model_type=model_type,
@@ -44,6 +43,7 @@ class BaseDetectionLightningModule(pl.LightningModule):
             probabilistic=cfg.MODEL.PROBABILISTIC,
             anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
             anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
+            architecture=getattr(cfg.MODEL, 'ARCHITECTURE', None) or None,
         )
 
     # ------------------------------------------------------------------
@@ -82,7 +82,6 @@ class BaseDetectionLightningModule(pl.LightningModule):
             freeze_layers(self.model, self.cfg.MISC.FROZEN_LAYERS)
             print(f"Frozen layers: {self.cfg.MISC.FROZEN_LAYERS}")
 
-        self._warmup_iters = 1000 #min(1000, max(int(self.trainer.num_training_batches) - 1, 1))
         self._model_configured = True
 
     def _get_train_dataset(self):
@@ -142,16 +141,9 @@ class BaseDetectionLightningModule(pl.LightningModule):
                 {"params": other_params, "lr": self.cfg.TRAIN.BASE_LR},
             ],
             momentum=0.9,
-            weight_decay=0.001,
+            weight_decay=0.005,
         )
 
-        def warmup_lambda(step: int):
-            warmup_iters = self._warmup_iters if self._warmup_iters is not None else 1
-            if step >= warmup_iters:
-                return 1.0
-            alpha = float(step) / float(max(warmup_iters, 1))
-            return (1.0 / 1000.0) * (1.0 - alpha) + alpha
-        warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
         main_scheduler = MultiStepLR(
             optimizer,
             milestones=list(self.cfg.TRAIN.MILESTONES),
@@ -170,8 +162,5 @@ class BaseDetectionLightningModule(pl.LightningModule):
             raise ValueError(f"Unsupported scheduler: {self.cfg.TRAIN.SCHEDULER}")
         return (
             [optimizer],
-            [
-                {"scheduler": warmup_scheduler, "interval": "step", "frequency": 1, "name": "warmup"},
-                {"scheduler": epoch_scheduler, "interval": "epoch", "frequency": 1, "name": "epoch_lr"},
-            ],
+            [{"scheduler": epoch_scheduler, "interval": "epoch", "frequency": 1, "name": "epoch_lr"}],
         )
