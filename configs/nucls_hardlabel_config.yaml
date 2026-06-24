@@ -1,58 +1,54 @@
 DATA:
   DATASET: 'nucls'
   ROOT: '/media/klee_ro/public_datasets/nucls'
-  SOFT_LABEL_FILE_1D: '../outputs/nucls/1d_gaussian_softlabels/1DGMM_softLabels_iou0_25_with_priors.json'
-  HARD_LABEL_FILE: '../outputs/nucls/hard_labels/HardLabels_MajorityVote_iou0_25.json'
+  SOFT_LABEL_FILE_1D: '../outputs/nucls_transform_0.001/1d_gaussian_softlabels/1DGMM_softLabels_iou0_25_with_priors.json'
+  HARD_LABEL_FILE: '../outputs/nucls_transform_0.001/hard_labels/HardLabels_MajorityVote_iou.json'
   GMM_TYPE: 'HARD_LABEL'
   TEST_SPLIT_RATIO: 0.10
+  VAL_SPLIT_RATIO: 0.10
   BALANCED_SAMPLER: True
   RFS_THRESHOLD: 0.25
-  # NuCLS has no No Finding class — all clusters are nucleus types
   IGNORE_NOFINDING_IMAGES: False
   DOWNWEIGHT_NOFINDING_IMAGES: False
   NOFINDING_INCLUDE_FRACTION: 1.0
   OPTIONS:
-    rater_weights_csv: '../outputs/nucls/reliability/annotator_reliability_scores_nucls_iou0_25.csv'
+    rater_weights_csv: '../outputs/nucls_transform_0.001/reliability/annotator_reliability_scores_nucls_iou0_25.csv'
     image_extension: '.png'
 
 MODEL:
-  NUM_CLASSES: 14  # 0=background, 1=vacant(No Finding), 2-13=nucleus types
+  NUM_CLASSES: 14
   BACKBONE: 'resnet50'
-  PROBABILISTIC: False  # Hard label head — no variance prediction
-  # Inverse frequency weighting — NuCLS imbalance too severe for inverse_sqrt
+  PROBABILISTIC: False
   ROI_HEAD_BUFFER_FREQ_TERM: 'inverse'
-  ROI_HEAD_BUFFER_MAX_WEIGHT: 3.0
-  ANCHOR_SIZES: [[16], [32], [64], [96], [128]]
-  ANCHOR_ASPECT_RATIOS: [[0.75, 1.0, 1.5]]
+  ROI_HEAD_BUFFER_MAX_WEIGHT: 15.0
+  ANCHOR_SIZES: [[8], [16], [32], [64], [128]]
+  ANCHOR_ASPECT_RATIOS: [[0.5,0.75,1.0,1.5,2.0]]
 
 MISC:
-  RUN_NAME: 'nucls_hardlabels_iou0_25_30epochs'
-  RESULTS_CSV: '../outputs/nucls/training_metric_logs'
-  SAVE_MODEL_PATH: '../outputs/saved_models/nucls/hard_labels'
-  EVALUATION_RESULTS_DIR: '../outputs/nucls/hard_labels/evaluation_results'
+  RUN_NAME: 'nucls_hardlabels_iou0_25_100epochs_v1'
+  RESULTS_CSV: '../outputs/nucls_transform_0.001/training_metric_logs'
+  SAVE_MODEL_PATH: '../outputs/saved_models/nucls_transform_0.001/hard_labels'
+  EVALUATION_RESULTS_DIR: '../outputs/nucls_transform_0.001/hard_labels/evaluation_results'
   PRETRAINED_WEIGHTS: ''
-  FROZEN_LAYERS: []
+  FROZEN_LAYERS: ['layer1', 'layer2']
   NO_CUDA: False
 
 TRAIN:
-  # OPTIMIZER: 'ADAMW' - > Hardcoded for now
-  # WEIGHT_DECAY: 1e-4
-  BASE_LR_BBOX: 0.0001
-  BASE_LR_CLASS: 0.0001
-  BASE_LR: 0.0001       
+  BASE_LR_BBOX: 0.00015
+  BASE_LR_CLASS: 0.00015
+  BASE_LR: 0.00015
   BOX_REG_LOSS_WEIGHT: 1.0
   SCHEDULER: 'secondary_scheduler'
-  MILESTONES: [20, 25]
-  GAMMA: 0.5
+  MILESTONES: [60,100, 130]
+  GAMMA: 0.1
   BATCH_SIZE: 8
   OVERFIT_BATCHES: 0
-  NUM_EPOCHS: 40
+  NUM_EPOCHS: 200
   EARLY_STOPPING: False
-  MAP_EVAL_FREQ: 10  
+  MAP_EVAL_FREQ: 10
 
 LIGHTNING:
   ACCELERATOR: 'cuda'
-  # DEVICES: [0]
   PRECISION: 32
   DETERMINISTIC: False
   NUM_SANITY_VAL_STEPS: 0
@@ -62,10 +58,16 @@ LIGHTNING:
 
 AUGMENTATION:
   HORIZONTAL_FLIP_PROB: 0.5
-  ROTATION_DEGREES: 90           # nuclei are rotation invariant
-  BRIGHTNESS_RANGE: (0.8, 1.2)   # H&E stain variation
+  VERTICAL_FLIP_PROB: 0.5
+  ROTATION_DEGREES: 90
+  BRIGHTNESS_RANGE: (0.8, 1.2)
   CONTRAST_RANGE: (0.8, 1.2)
+  HUE_DELTA: 0.05
+  SATURATION_RANGE: (0.8, 1.2)
+  GAUSSIAN_BLUR_PROB: 0.3
+  RANDOM_CROP_PROB: 0.5
+  RANDOM_CROP_SCALE: (0.7, 1.0)
   NOISE_STD: 0.03
-  RARE_CLASS_INDICES: [3, 5, 6, 8, 9, 10, 11, 12]  # mitotic_figure, vascular_endothelium, macrophage, plasma_cell, neutrophil, eosinophil, myoepithelium, apoptotic_body
-  RARE_CLASS_AUGMENT_PROB: 0.5
-  COMMON_CLASS_AUGMENT_PROB: 0.3
+  RARE_CLASS_INDICES: [3, 5, 6, 8, 9, 10, 11, 12]
+  RARE_CLASS_AUGMENT_PROB: 0.7
+  COMMON_CLASS_AUGMENT_PROB: 0.2

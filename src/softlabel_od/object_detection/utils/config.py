@@ -75,6 +75,12 @@ def get_cfg_defaults():
     _C.AUGMENTATION.RARE_CLASS_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     _C.AUGMENTATION.RARE_CLASS_AUGMENT_PROB = 1.0
     _C.AUGMENTATION.COMMON_CLASS_AUGMENT_PROB = 0.2
+    _C.AUGMENTATION.VERTICAL_FLIP_PROB = 0.0          # default off — safe for VinDr
+    _C.AUGMENTATION.HUE_DELTA = 0.0                   # default off
+    _C.AUGMENTATION.SATURATION_RANGE = (1.0, 1.0)     # default no-op
+    _C.AUGMENTATION.GAUSSIAN_BLUR_PROB = 0.0           # default off
+    _C.AUGMENTATION.RANDOM_CROP_PROB = 0.0             # default off
+    _C.AUGMENTATION.RANDOM_CROP_SCALE = (1.0, 1.0)    # default no-op (full image)
 
     # Miscellaneous settings
     _C.MISC = CN()

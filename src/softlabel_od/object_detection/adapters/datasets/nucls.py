@@ -9,8 +9,12 @@ class NuCLSDataset(CanonicalDetectionDataset):
     """
     NuCLS adapter over the shared canonical-label dataset workflow.
 
-    Nucleus-level pathology dataset. No 'No Finding' class — foreground
-    classes start at index 2, index 1 is "No Finding" class just for framework convention.
+    Nucleus-level pathology dataset for breast cancer histopathology.
+    No 'No Finding' class — foreground classes start at index 2.
+    Index 0 = background, index 1 = vacant (framework convention).
+
+    Split handling mirrors VinDrCXR: passes split= directly to base class
+    so split='test' correctly returns the held-out test set (not val set).
     """
 
     def __init__(
@@ -18,8 +22,10 @@ class NuCLSDataset(CanonicalDetectionDataset):
         root,
         label_file,
         transforms=None,
-        train=True,
-        test_split_ratio=0.2,
+        split="train",
+        train=None,
+        test_split_ratio=0.1,
+        val_split_ratio=0.1,
         label_mode=None,
         gmm_type="1D",
         dataset_type="soft",
@@ -36,8 +42,10 @@ class NuCLSDataset(CanonicalDetectionDataset):
             root=root,
             label_file=label_file,
             transforms=transforms,
+            split=split,
             train=train,
             test_split_ratio=test_split_ratio,
+            val_split_ratio=val_split_ratio,
             label_mode=label_mode,
             dataset_type=dataset_type,
             gmm_type=gmm_type,
@@ -63,13 +71,12 @@ class NuCLSDataset(CanonicalDetectionDataset):
         }
 
     def get_num_classes(self) -> int:
-    # Indices run 0=background, 1=vacant, 2-13=nucleus types
-    # max index is 13 → need 14 slots
+        # Indices: 0=background, 1=vacant, 2-13=nucleus types
+        # max index is 13 → need 14 slots
         return max(self.class_to_idx.values()) + 1
-    
+
     def resolve_image_path(self, image_id: str) -> str:
         return os.path.join(self.root, "images", image_id + self.image_extension)
 
-    
 
 NuCLSDataset = NuCLSDataset

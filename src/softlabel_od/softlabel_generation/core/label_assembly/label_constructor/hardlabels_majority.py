@@ -152,7 +152,7 @@ def main():
     # File paths
     project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', '..'))   
     input_file = args.input_file
-    output_dir = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels')
+    output_dir = os.path.join(project_root_ext, 'outputs/nucls_transform_0.001/hard_labels')
     output_file = os.path.join(output_dir, f'HardLabels_MajorityVote_{args.clustering_method}.json')
 
     # Create output directory if it doesn't exist

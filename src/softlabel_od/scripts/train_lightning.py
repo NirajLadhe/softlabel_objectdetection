@@ -122,7 +122,7 @@ def main():
         enable_progress_bar=cfg.LIGHTNING.ENABLE_PROGRESS_BAR,
         deterministic=cfg.LIGHTNING.DETERMINISTIC,
         precision=cfg.LIGHTNING.PRECISION,
-        gradient_clip_val=5.0,
+        gradient_clip_val=3.0, # From 5 to 3 for nucls
         gradient_clip_algorithm="norm",
         # Overfit is handled at the DataModule level, not here.
         # Leave overfit_batches=0 so Lightning doesn't override the dataloader.

@@ -65,8 +65,8 @@ def evaluate(args):
         backbone=args.backbone,
         probabilistic=probabilistic,
         device=device,
-        anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
-        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS * len(cfg.MODEL.ANCHOR_SIZES),
+        # anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+        # anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS * len(cfg.MODEL.ANCHOR_SIZES),
     )
 
     predictions, ground_truths = collect_predictions(model, test_loader, device=device, is_probabilistic=probabilistic)
@@ -138,8 +138,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-classes", type=int, default=16)
     parser.add_argument("--backbone", type=str, default="resnet50", choices=["resnet50", "resnet101", "mobilenet"])
-    parser.add_argument("--test-split-ratio", type=float, default=0.20)
-    parser.add_argument("--val-split-ratio", type=float, default=0.20)
+    parser.add_argument("--test-split-ratio", type=float, default=None)
+    parser.add_argument("--val-split-ratio", type=float, default=None)
     parser.add_argument("--num-workers", type=int, default=None, help="Number of workers for dataloader (0 = single-process)")
     parser.add_argument("--cpu", action="store_true")
     args = parser.parse_args()

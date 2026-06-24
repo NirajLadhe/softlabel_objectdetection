@@ -18,11 +18,12 @@ from collections import defaultdict
 from pathlib import Path
 
 # Configuration
-CSV_PATH = '/home/haaroon/SoftLabel_Generation/vindr_cxr/train_enriched.csv'
-OUTPUT_JSON = '/home/haaroon/SoftLabel_Generation/vindr_cxr/anchor_analysis.json'
+CSV_PATH = '/home/abhay/tasks-assignments/softlabel_objectdetection/outputs/nucls/nucls_canonical.csv'
+OUTPUT_JSON = '/home/abhay/tasks-assignments/softlabel_objectdetection/outputs/nucls/anchor_analysis.json'
 
 print("="*80)
-print("ANCHOR ANALYSIS FOR VinDr-CXR DATASET")
+# print("ANCHOR ANALYSIS FOR VinDr-CXR DATASET")
+print("ANCHOR ANALYSIS FOR NuCLS DATASET")
 print("="*80)
 
 # Load data
@@ -31,7 +32,8 @@ df = pd.read_csv(CSV_PATH)
 print(f"Total annotations: {len(df)}")
 
 # Filter out 'No Finding' annotations (they have NaN or placeholder bboxes)
-df_findings = df[df['class_id'] != 14].copy()  # class_id 14 = No Finding
+# df_findings = df[df['class_id'] != 14].copy()  # class_id 14 = No Finding
+df_findings = df.copy()  # NuCLS has no No Finding class — keep all rows
 df_findings = df_findings.dropna(subset=['x_min', 'y_min', 'x_max', 'y_max'])
 
 # Filter out invalid bboxes

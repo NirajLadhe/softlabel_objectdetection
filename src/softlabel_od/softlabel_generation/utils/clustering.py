@@ -624,13 +624,21 @@ def normalize_annotator_weights(csv_path: str) -> Dict[str, float]:
     annotator_ids = df['Annotator'].astype(str)
     weights = df['Avg K-alpha'].astype(float).fillna(0)
 
-    # Normalize weights (sum to 1)
-    if weights.sum() == 0:
+    weight_sum = weights.sum()
+
+    if weight_sum == 0:
         print("Warning: Sum of weights is zero, cannot normalize.")
         return {}
+    elif weight_sum < 0:
+        # GUARD: negative sum would invert all signs — reliable raters
+        # become negative weights and unreliable raters become positive.
+        # Normalize by absolute sum instead to preserve signs.
+        print(f"Warning: Sum of K-alpha weights is negative ({weight_sum:.4f}). "
+              f"Normalizing by absolute sum to preserve reliability sign.")
+        normalized_weights = weights / abs(weight_sum)
     else:
-        normalized_weights = weights / weights.sum()
-    
+        normalized_weights = weights / weight_sum
+
     return dict(zip(annotator_ids, normalized_weights))
 
 

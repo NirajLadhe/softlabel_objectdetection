@@ -23,6 +23,6 @@ PIPELINE:
   reliability_method: "shm"
 
 PATHS:
-  input_csv: "outputs/nucls/nucls_canonical.csv"
-  output_dir: "outputs/nucls"
-  reliability_dir: "outputs/nucls/reliability"
+  input_csv: "outputs/nucls_transform_0.001/nucls_canonical.csv"
+  output_dir: "outputs/nucls_transform_0.001"
+  reliability_dir: "outputs/nucls_transform_0.001/reliability"

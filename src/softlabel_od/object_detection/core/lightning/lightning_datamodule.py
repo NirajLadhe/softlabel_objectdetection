@@ -68,9 +68,16 @@ class DetectionLightningDataModule(pl.LightningDataModule):
             rare_class_indices=cfg.AUGMENTATION.RARE_CLASS_INDICES,
             rare_augment_prob=cfg.AUGMENTATION.RARE_CLASS_AUGMENT_PROB,
             common_augment_prob=cfg.AUGMENTATION.COMMON_CLASS_AUGMENT_PROB,
+            horizontal_flip_prob=cfg.AUGMENTATION.HORIZONTAL_FLIP_PROB,
+            vertical_flip_prob=cfg.AUGMENTATION.VERTICAL_FLIP_PROB,
             rotation_degrees=cfg.AUGMENTATION.ROTATION_DEGREES,
             brightness_range=cfg.AUGMENTATION.BRIGHTNESS_RANGE,
             contrast_range=cfg.AUGMENTATION.CONTRAST_RANGE,
+            hue_delta=cfg.AUGMENTATION.HUE_DELTA,
+            saturation_range=cfg.AUGMENTATION.SATURATION_RANGE,
+            gaussian_blur_prob=cfg.AUGMENTATION.GAUSSIAN_BLUR_PROB,
+            crop_prob=cfg.AUGMENTATION.RANDOM_CROP_PROB,
+            crop_scale=cfg.AUGMENTATION.RANDOM_CROP_SCALE,
             noise_std=cfg.AUGMENTATION.NOISE_STD,
         )
         val_transform = MinimalAugmentation()

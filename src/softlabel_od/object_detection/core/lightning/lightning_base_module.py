@@ -82,7 +82,7 @@ class BaseDetectionLightningModule(pl.LightningModule):
             freeze_layers(self.model, self.cfg.MISC.FROZEN_LAYERS)
             print(f"Frozen layers: {self.cfg.MISC.FROZEN_LAYERS}")
 
-        self._warmup_iters = 1000 #min(1000, max(int(self.trainer.num_training_batches) - 1, 1))
+        self._warmup_iters = 100 #min(1000, max(int(self.trainer.num_training_batches) - 1, 1))
         self._model_configured = True
 
     def _get_train_dataset(self):
@@ -135,14 +135,27 @@ class BaseDetectionLightningModule(pl.LightningModule):
                 class_params.append(param)
             else:
                 other_params.append(param)
-        optimizer = torch.optim.SGD(
-            [
-                {"params": bbox_params, "lr": self.cfg.TRAIN.BASE_LR_BBOX},
-                {"params": class_params, "lr": self.cfg.TRAIN.BASE_LR_CLASS},
-                {"params": other_params, "lr": self.cfg.TRAIN.BASE_LR},
-            ],
-            momentum=0.9,
-            weight_decay=0.001,
+
+        # optimizer = torch.optim.SGD(
+        #     [
+        #         {"params": bbox_params, "lr": self.cfg.TRAIN.BASE_LR_BBOX},
+        #         {"params": class_params, "lr": self.cfg.TRAIN.BASE_LR_CLASS},
+        #         {"params": other_params, "lr": self.cfg.TRAIN.BASE_LR},
+        #     ],
+        #     momentum=0.9,
+        #     weight_decay=0.0015,
+        # )
+
+        param_groups = [
+            {"params": bbox_params, "lr": self.cfg.TRAIN.BASE_LR_BBOX},
+            {"params": class_params, "lr": self.cfg.TRAIN.BASE_LR_CLASS},
+            {"params": other_params, "lr": self.cfg.TRAIN.BASE_LR},
+        ]
+        
+        # Strictly using AdamW for this run (bypassing YAML config checks)
+        optimizer = torch.optim.AdamW(
+            param_groups, 
+            weight_decay=0.01
         )
 
         def warmup_lambda(step: int):
