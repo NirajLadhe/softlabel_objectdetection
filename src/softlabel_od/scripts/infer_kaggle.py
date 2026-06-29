@@ -1,7 +1,7 @@
 """
 CLI entry point: softlabel-infer-kaggle
 
-Run trained hard-label Faster R-CNN on Kaggle VinBigData test PNGs and write
+Run trained Faster R-CNN on Kaggle VinBigData test PNGs and write
 submission.csv (image_id, PredictionString).
 """
 
@@ -21,7 +21,6 @@ from softlabel_od.object_detection.utils.kaggle_submission import (
     MODEL_NO_FINDING_IDX,
     KaggleTestImageDataset,
     build_submission_dataframe,
-    detection_to_tokens,
     inject_no_finding_if_empty,
     prediction_dict_to_string,
 )
@@ -31,6 +30,18 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
 
 
+def default_config_for_gmm_type(gmm_type: str) -> str:
+    if gmm_type == "1D":
+        return os.path.join(
+            PROJECT_ROOT, "configs/vindrcxr_1d_softlabel_config_albers.yaml"
+        )
+    if gmm_type == "HARD_LABEL":
+        return os.path.join(
+            PROJECT_ROOT, "configs/vindrcxr_hardlabel_config_albers.yaml"
+        )
+    raise ValueError(f"Unsupported gmm_type: {gmm_type}")
+
+
 def run_inference(args) -> None:
     device = torch.device(
         "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
@@ -38,6 +49,10 @@ def run_inference(args) -> None:
     print(f"Device: {device}")
 
     cfg = get_cfg_from_file(args.config)
+    is_hard = args.gmm_type == "HARD_LABEL"
+    probabilistic = not is_hard
+    num_classes = args.num_classes or cfg.MODEL.NUM_CLASSES
+    backbone = args.backbone or cfg.MODEL.BACKBONE
 
     print(f"\nLoading test images from: {args.test_dir}")
     test_dataset = KaggleTestImageDataset(
@@ -55,16 +70,19 @@ def run_inference(args) -> None:
     print(f"Test set: {len(test_dataset)} images")
 
     print(f"\nLoading model from: {args.weights}")
+    print(
+        f"Model type: {args.gmm_type} "
+        f"({'hard-label' if is_hard else '1D soft-label/probabilistic'})"
+    )
     model = load_model(
         weights_path=args.weights,
-        num_classes=args.num_classes,
-        model_type="HARD_LABEL",
-        backbone=args.backbone,
-        probabilistic=False,
+        num_classes=num_classes,
+        model_type=args.gmm_type,
+        backbone=backbone,
+        probabilistic=probabilistic,
         device=device,
         anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
-        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS
-        * len(cfg.MODEL.ANCHOR_SIZES),
+        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
     )
     model.eval()
 
@@ -85,7 +103,7 @@ def run_inference(args) -> None:
                     width,
                     height,
                     score_threshold=args.score_threshold,
-                    max_nf_box_area_frac=args.max_nf_box_area_frac,
+                    nf_huge_area_frac=args.nf_huge_area_frac,
                 )
 
                 if args.inject_no_finding:
@@ -134,10 +152,22 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(
-            PROJECT_ROOT, "configs/vindrcxr_hardlabel_config_albers.yaml"
+        default=None,
+        help=(
+            "Model config (.yaml) used at training time. If omitted, a default "
+            "VinDr-CXR config is selected from --gmm-type."
         ),
-        help="Model config (.yaml) used at training time",
+    )
+    parser.add_argument(
+        "--gmm-type",
+        type=str,
+        default=None,
+        choices=["1D", "HARD_LABEL"],
+        help=(
+            "Checkpoint/model family to load, matching the evaluation script. "
+            "If omitted with --config, inferred from DATA.GMM_TYPE; if both "
+            "are omitted, defaults to HARD_LABEL."
+        ),
     )
     parser.add_argument(
         "--weights",
@@ -176,13 +206,15 @@ def main():
     parser.add_argument(
         "--num-classes",
         type=int,
-        default=16,
+        default=None,
+        help="Number of model classes including background; defaults to config",
     )
     parser.add_argument(
         "--backbone",
         type=str,
-        default="resnet50",
+        default=None,
         choices=["resnet50", "resnet101", "mobilenet"],
+        help="Backbone architecture; defaults to config",
     )
     parser.add_argument(
         "--image-extension",
@@ -201,22 +233,24 @@ def main():
         help="Extra score filter at CSV time (model already uses score_thresh=0.4)",
     )
     parser.add_argument(
-        "--max-nf-box-area-frac",
+        "--nf-huge-area-frac",
         type=float,
-        default=0.95,
-        help="Drop No-Finding boxes covering more than this fraction of the image; "
-        "set negative to disable",
+        default=0.90,
+        help="Treat No-finding boxes larger than this image-area fraction as full-image placeholders",
     )
     parser.add_argument(
-        "--inject-no-finding",
-        action="store_true",
-        help="If no pathology boxes, add class_id=14 No finding row",
+        "--no-inject-no-finding",
+        dest="inject_no_finding",
+        action="store_false",
+        help="Do not add class_id=14 No finding when no pathology boxes remain",
     )
+    parser.set_defaults(inject_no_finding=True)
+
     parser.add_argument(
         "--nf-full-image-box",
         action="store_true",
-        default=True,
-        help="Use full-image box for injected No finding (default: on)",
+        default=False,
+        help="Use full-image box for injected No finding instead of Kaggle marker box",
     )
     parser.add_argument(
         "--cpu",
@@ -224,8 +258,21 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.max_nf_box_area_frac is not None and args.max_nf_box_area_frac < 0:
-        args.max_nf_box_area_frac = None
+    if args.config is None:
+        args.gmm_type = args.gmm_type or "HARD_LABEL"
+        args.config = default_config_for_gmm_type(args.gmm_type)
+        print(f"Auto-selected config: {args.config}")
+    elif args.gmm_type is None:
+        cfg = get_cfg_from_file(args.config)
+        args.gmm_type = getattr(cfg.DATA, "GMM_TYPE", "HARD_LABEL")
+        if args.gmm_type not in ("1D", "HARD_LABEL"):
+            raise ValueError(
+                f"Unsupported DATA.GMM_TYPE in config: {args.gmm_type}"
+            )
+        print(f"Inferred model type from config: {args.gmm_type}")
+
+    if args.nf_huge_area_frac is not None and args.nf_huge_area_frac < 0:
+        args.nf_huge_area_frac = None
 
     run_inference(args)
 

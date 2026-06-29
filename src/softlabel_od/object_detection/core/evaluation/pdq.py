@@ -50,6 +50,16 @@ import glob
 from tqdm import tqdm
 import warnings
 
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
+
+def _process_image_task(args):
+    pred, gt, heatmap_threshold, bbox_std_fallback = args
+    per_img_size = gt.get("image_size")
+    if per_img_size is None:
+        raise ValueError("PDQ requires gt['image_size'] to dynamically generate spatial heatmaps.")
+    return _evaluate_image(pred, gt, per_img_size, heatmap_threshold, bbox_std_fallback=bbox_std_fallback)
+
 
 from softlabel_od.object_detection.core.evaluation.metrics import delta_stds_to_pixel_stds
 
@@ -183,37 +193,31 @@ def compute_pdq(
     """
     assert len(predictions) == len(ground_truths), \
         "Number of prediction and ground-truth images must match."
-
     tot_overall_quality = 0.0
     tot_spatial_quality = 0.0
     tot_label_quality = 0.0
     tot_tp = 0
     tot_fp = 0
     tot_fn = 0
-
-    paired = zip(predictions, ground_truths)
-    if show_progress:
-        paired = tqdm(paired, total=len(predictions), desc="PDQ", unit="img")
-
-    for pred, gt in paired:
-        per_img_size = gt.get("image_size")
-        if per_img_size is None:
-            raise ValueError("PDQ requires gt['image_size'] to dynamically generate spatial heatmaps.")
-            
-        img_results = _evaluate_image(pred, gt, per_img_size, heatmap_threshold, bbox_std_fallback=bbox_std_fallback)
+    tasks = [(pred, gt, heatmap_threshold, bbox_std_fallback) for pred, gt in zip(predictions, ground_truths)]
+    num_workers = min(multiprocessing.cpu_count(), 16) # Use up to 16 cores
+    
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        if show_progress:
+            results = list(tqdm(executor.map(_process_image_task, tasks), total=len(tasks), desc="PDQ", unit="img"))
+        else:
+            results = list(executor.map(_process_image_task, tasks))
+    for img_results in results:
         tot_overall_quality += img_results["overall"]
         tot_spatial_quality += img_results["spatial"]
         tot_label_quality   += img_results["label"]
         tot_tp += img_results["TP"]
         tot_fp += img_results["FP"]
         tot_fn += img_results["FN"]
-
     tot_pairs = tot_tp + tot_fp + tot_fn
-
     pdq_score = tot_overall_quality / tot_pairs if tot_pairs > 0 else 0.0
     avg_spatial = tot_spatial_quality / tot_tp if tot_tp > 0 else 0.0
     avg_label   = tot_label_quality   / tot_tp if tot_tp > 0 else 0.0
-
     return {
         "pdq": float(pdq_score),
         "avg_spatial_quality": float(avg_spatial),
@@ -271,10 +275,12 @@ def _evaluate_image(
     heatmaps = _build_gaussian_heatmaps(pred_boxes, pixel_stds, H, W, heatmap_threshold)
 
     # Build GT pixel masks: shape (H, W, G)
-    gt_fg_masks, gt_bg_masks, num_fg_pixels = _build_gt_masks(gt_boxes, H, W)
+    num_fg_pixels = _get_num_fg_pixels(gt_boxes, H, W)
+    # gt_fg_masks, gt_bg_masks, num_fg_pixels = _build_gt_masks(gt_boxes, H, W)
 
     # Vectorised spatial quality: (G, D) matrix
-    spatial_qual = _compute_spatial_quality(gt_fg_masks, gt_bg_masks, heatmaps, num_fg_pixels)
+    spatial_qual = _compute_spatial_quality(gt_boxes, heatmaps, num_fg_pixels, H, W)
+    # spatial_qual = _compute_spatial_quality(gt_fg_masks, gt_bg_masks, heatmaps, num_fg_pixels)
 
     # Vectorised label quality: (G, D) matrix
     try:
@@ -384,6 +390,18 @@ def _build_gt_masks(gt_boxes: np.ndarray, H: int, W: int):
     return fg_masks, bg_masks, num_fg_pixels
 
 
+def _get_num_fg_pixels(gt_boxes: np.ndarray, H: int, W: int) -> np.ndarray:
+    """Compute the area (number of foreground pixels) for each GT box."""
+    G = len(gt_boxes)
+    num_fg_pixels = np.zeros((G, 1), dtype=np.float32)
+    for g_idx, box in enumerate(gt_boxes):
+        x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(W, x2), min(H, y2)
+        area = max(1, (x2 - x1) * (y2 - y1))
+        num_fg_pixels[g_idx, 0] = area
+    return num_fg_pixels
+
 
 def _build_gaussian_heatmaps(
     pred_boxes: np.ndarray,
@@ -457,59 +475,43 @@ def _build_gaussian_heatmaps(
 
 
 def _compute_spatial_quality(
-    fg_masks: np.ndarray,
-    bg_masks: np.ndarray,
+    gt_boxes: np.ndarray,
     heatmaps: np.ndarray,
     num_fg_pixels: np.ndarray,
+    H: int,
+    W: int,
 ) -> np.ndarray:
-    """
-    Compute spatial quality Q_S(G, D) for all (GT, Detection) pairs.
-
-    The spatial quality is computed as:
-
-        loss_fg(G, D) = sum_{p in FG(G)} log( heatmap_D(p) )
-        loss_bg(G, D) = sum_{p in BG(G)} log( 1 - heatmap_D(p) )   [only where heatmap > 0]
-        total_loss    = loss_fg + loss_bg
-        Q_S(G, D)     = exp( total_loss / |FG(G)| )
-
-    The logic:
-    - Foreground pixels should have HIGH probability in the heatmap → log near 0
-    - Background pixels should have LOW probability → (1 - p) near 1 → log near 0
-    - Any deviation from perfect prediction reduces the score exponentially.
-
-    Args:
-        fg_masks:      (H, W, G) bool — foreground regions for each GT
-        bg_masks:      (H, W, G) bool — background regions for each GT
-        heatmaps:      (H, W, D) float — Gaussian heatmaps for each detection
-        num_fg_pixels: (G, 1) int — number of foreground pixels per GT
-
-    Returns:
-        spatial_qual: (G, D) float array, values in [0, 1]
-    """
-    # Foreground log-loss: log( p + epsilon ) for pixels inside GT box
-    log_heatmap = np.log(heatmaps + _SMALL_VAL)                         # (H, W, D)
-
-    # Background log-loss: log( 1 - p + epsilon ) for pixels OUTSIDE GT box,
-    # but only where the heatmap is non-zero (efficiency + matches reference impl)
-    log_bg = np.log(1.0 - heatmaps + _SMALL_VAL) * (heatmaps > 0)       # (H, W, D)
-
-    # Tensordot computes sum over (H, W) axes:
-    # fg_loss[g, d] = sum_{x,y} fg_masks[x,y,g] * log_heatmap[x,y,d]
-    fg_loss = np.tensordot(fg_masks.astype(np.float32), log_heatmap,
-                           axes=([0, 1], [0, 1]))   # (G, D)
-    bg_loss = np.tensordot(bg_masks.astype(np.float32), log_bg,
-                           axes=([0, 1], [0, 1]))   # (G, D)
-
-    total_loss = fg_loss + bg_loss                  # (G, D)
-
-    # Normalise by the number of foreground pixels in each GT and exponentiate
-    loss_per_pixel = total_loss / num_fg_pixels     # (G, D) broadcast
-    spatial_qual   = np.exp(loss_per_pixel)         # (G, D), values in (0, 1]
-
-    # Clamp floating point noise at the boundaries
+    G = len(gt_boxes)
+    D = heatmaps.shape[2]
+    
+    log_heatmap = np.log(heatmaps + _SMALL_VAL)
+    log_bg = np.log(1.0 - heatmaps + _SMALL_VAL) * (heatmaps > 0)
+    
+    # Total background loss for each detection over the whole image
+    total_log_bg = log_bg.sum(axis=(0, 1)) # Shape: (D,)
+    
+    fg_loss = np.zeros((G, D), dtype=np.float32)
+    bg_loss = np.zeros((G, D), dtype=np.float32)
+    
+    for g in range(G):
+        x1, y1, x2, y2 = int(gt_boxes[g, 0]), int(gt_boxes[g, 1]), int(gt_boxes[g, 2]), int(gt_boxes[g, 3])
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(W, x2), min(H, y2)
+        
+        # Sum over the bounding box region only
+        fg_loss[g, :] = log_heatmap[y1:y2, x1:x2, :].sum(axis=(0, 1))
+        bg_loss_in_box = log_bg[y1:y2, x1:x2, :].sum(axis=(0, 1))
+        
+        # Background loss outside the box is total minus inside
+        bg_loss[g, :] = total_log_bg - bg_loss_in_box
+        
+    total_loss = fg_loss + bg_loss
+    loss_per_pixel = total_loss / num_fg_pixels
+    spatial_qual = np.exp(loss_per_pixel)
+    
     spatial_qual[np.isclose(spatial_qual, 0.0)] = 0.0
     spatial_qual[np.isclose(spatial_qual, 1.0)] = 1.0
-
+    
     return spatial_qual.astype(np.float32)
 
 

@@ -174,102 +174,120 @@ def clip_box_xyxy(
     return x1, y1, x2, y2
 
 
-def detection_to_tokens(
-    box: Sequence[float],
-    score: float,
-    model_label: int,
-    image_width: int,
-    image_height: int,
-    *,
-    skip_background: bool = True,
-    max_nf_box_area_frac: float | None = 0.95,
-) -> str | None:
-    """
-    One detection -> 'class_id score x_min y_min x_max y_max'.
-    Returns None if the detection should be dropped.
-    """
-    label = int(model_label)
-    if skip_background and label == 0:
-        return None
-    if label not in MODEL_IDX_TO_KAGGLE:
-        return None
+# def detection_to_tokens(
+#     box: Sequence[float],
+#     score: float,
+#     model_label: int,
+#     image_width: int,
+#     image_height: int,
+#     *,
+#     skip_background: bool = True,
+#     max_nf_box_area_frac: float | None = 0.95,
+# ) -> str | None:
+#     """
+#     One detection -> 'class_id score x_min y_min x_max y_max'.
+#     Returns None if the detection should be dropped.
+#     """
+#     label = int(model_label)
+#     if skip_background and label == 0:
+#         return None
+#     if label not in MODEL_IDX_TO_KAGGLE:
+#         return None
 
-    kaggle_id = MODEL_IDX_TO_KAGGLE[label]
-    x1, y1, x2, y2 = clip_box_xyxy(box, image_width, image_height)
+#     kaggle_id = MODEL_IDX_TO_KAGGLE[label]
+#     x1, y1, x2, y2 = clip_box_xyxy(box, image_width, image_height)
 
-    if (
-        max_nf_box_area_frac is not None
-        and label == MODEL_NO_FINDING_IDX
-        and image_width > 0
-        and image_height > 0
-    ):
-        area_frac = (x2 - x1) * (y2 - y1) / (image_width * image_height)
-        if area_frac > max_nf_box_area_frac:
-            return None
+#     if (
+#         max_nf_box_area_frac is not None
+#         and label == MODEL_NO_FINDING_IDX
+#         and image_width > 0
+#         and image_height > 0
+#     ):
+#         area_frac = (x2 - x1) * (y2 - y1) / (image_width * image_height)
+#         if area_frac > max_nf_box_area_frac:
+#             return None
 
-    return f"{kaggle_id} {float(score):.4f} {x1} {y1} {x2} {y2}"
-
-
-def prediction_dict_to_string(
-    pred: dict,
-    image_width: int,
-    image_height: int,
-    *,
-    score_threshold: float = 0.0,
-    max_nf_box_area_frac: float | None = 0.95,
-) -> str:
-    boxes = pred["boxes"]
-    scores = pred["scores"]
-    labels = pred["labels"]
-
-    if hasattr(boxes, "cpu"):
-        boxes = boxes.cpu().numpy()
-    if hasattr(scores, "cpu"):
-        scores = scores.cpu().numpy()
-    if hasattr(labels, "cpu"):
-        labels = labels.cpu().numpy()
-
-    parts: List[str] = []
-    for box, score, label in zip(boxes, scores, labels):
-        if float(score) < score_threshold:
-            continue
-        token = detection_to_tokens(
-            box,
-            float(score),
-            int(label),
-            image_width,
-            image_height,
-            max_nf_box_area_frac=max_nf_box_area_frac,
-        )
-        if token:
-            parts.append(token)
-    return " ".join(parts)
+#     return f"{kaggle_id} {float(score):.4f} {x1} {y1} {x2} {y2}"
 
 
+# def prediction_dict_to_string(
+#     pred: dict,
+#     image_width: int,
+#     image_height: int,
+#     *,
+#     score_threshold: float = 0.0,
+#     max_nf_box_area_frac: float | None = 0.95,
+# ) -> str:
+#     boxes = pred["boxes"]
+#     scores = pred["scores"]
+#     labels = pred["labels"]
+
+#     if hasattr(boxes, "cpu"):
+#         boxes = boxes.cpu().numpy()
+#     if hasattr(scores, "cpu"):
+#         scores = scores.cpu().numpy()
+#     if hasattr(labels, "cpu"):
+#         labels = labels.cpu().numpy()
+
+#     parts: List[str] = []
+#     for box, score, label in zip(boxes, scores, labels):
+#         if float(score) < score_threshold:
+#             continue
+#         token = detection_to_tokens(
+#             box,
+#             float(score),
+#             int(label),
+#             image_width,
+#             image_height,
+#             max_nf_box_area_frac=max_nf_box_area_frac,
+#         )
+#         if token:
+#             parts.append(token)
+#     return " ".join(parts)
+
+
+# def inject_no_finding_if_empty(
+#     prediction_string: str,
+#     pathology_scores: Iterable[float],
+#     image_width: int,
+#     image_height: int,
+#     *,
+#     full_image_box: bool = True,
+# ) -> str:
+#     """
+#     Competition-style fallback: if no pathology boxes remain, emit No finding (14).
+#     Score = 1 - max(pathology confidence), or 1.0 if none were scored.
+#     """
+#     if prediction_string.strip():
+#         return prediction_string
+
+#     scores = list(pathology_scores)
+#     nf_score = 1.0 - max(scores) if scores else 1.0
+#     nf_score = float(np.clip(nf_score, 1e-4, 1.0))
+
+#     if full_image_box and image_width > 0 and image_height > 0:
+#         x1, y1, x2, y2 = 0, 0, image_width - 1, image_height - 1
+#     else:
+#         x1, y1, x2, y2 = 0, 0, 1, 1
+
+#     return f"{KAGGLE_NO_FINDING_ID} {nf_score:.4f} {x1} {y1} {x2} {y2}"
 def inject_no_finding_if_empty(
     prediction_string: str,
     pathology_scores: Iterable[float],
     image_width: int,
     image_height: int,
     *,
-    full_image_box: bool = True,
+    full_image_box: bool = False,
 ) -> str:
-    """
-    Competition-style fallback: if no pathology boxes remain, emit No finding (14).
-    Score = 1 - max(pathology confidence), or 1.0 if none were scored.
-    """
     if prediction_string.strip():
         return prediction_string
-
     scores = list(pathology_scores)
     nf_score = 1.0 - max(scores) if scores else 1.0
     nf_score = float(np.clip(nf_score, 1e-4, 1.0))
-
     if full_image_box and image_width > 0 and image_height > 0:
         x1, y1, x2, y2 = 0, 0, image_width - 1, image_height - 1
     else:
-        x1, y1, x2, y2 = 0, 0, 1, 1
-
+        x1, y1, x2, y2 = NF_SUBMISSION_BOX
     return f"{KAGGLE_NO_FINDING_ID} {nf_score:.4f} {x1} {y1} {x2} {y2}"
 
 

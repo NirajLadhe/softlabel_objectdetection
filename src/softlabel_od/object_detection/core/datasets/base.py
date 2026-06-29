@@ -615,6 +615,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             "labels": labels_tensor,
             "confidences": confidences,
             "image_id": self.build_image_id_tensor(image_id),
+            "original_image_id": image_id,
         }
         if self.transforms:
             image, target = self.transforms(image, target)
@@ -702,6 +703,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             "gt_stds": gt_stds,
             "gt_class_probs": class_probs,
             "image_id": self.build_image_id_tensor(image_id),
+            "original_image_id": image_id,
             "annotation_weight": annotation_weight,
         }
         if self.transforms:
@@ -758,6 +760,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             "gt_covariances": gt_covariances,
             "gt_class_probs": class_probs,
             "image_id": self.build_image_id_tensor(image_id),
+            "original_image_id": image_id,
         }
         if self.transforms:
             image, target = self.transforms(image, target)

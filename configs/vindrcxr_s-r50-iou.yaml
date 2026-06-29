@@ -1,0 +1,71 @@
+DATA:
+  DATASET: 'VinDr-CXR'
+  ROOT: '/media/klee_ro/public_datasets/vindr_cxr'
+  SOFT_LABEL_FILE_1D: '../outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json'
+  SOFT_LABEL_FILE_2D: '../outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json'
+  HARD_LABEL_FILE: '../outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json'
+  GMM_TYPE: '1D' # '1D' or '2D' or 'HARD_LABEL'
+  TEST_SPLIT_RATIO: 0.20
+  VAL_SPLIT_RATIO: 0.20
+  BALANCED_SAMPLER: True
+  RFS_THRESHOLD: 0.25   # Previously OVERSAMPLE_FACTOR
+  # No-Finding handling:
+  # IGNORE_NOFINDING_IMAGES=True: Skip images with only no-finding clusters (healthy CXR)
+  #   Applied before sampler creation, so balanced sampler works on pathology images only
+  # DOWNWEIGHT_NOFINDING_IMAGES=True: Downweight pure no-finding images in balanced sampler
+  #   Only affects WeightedRandomSampler weights, images are still included
+  IGNORE_NOFINDING_IMAGES: False
+  DOWNWEIGHT_NOFINDING_IMAGES: True
+  # Option 2: Include only a fraction (0.0-1.0) of pure no-finding images
+  # 1.0 = include all (default), 0.3 = include 30%, 0.0 = same as ignore all
+  NOFINDING_INCLUDE_FRACTION: 0.3
+
+MODEL:
+  NUM_CLASSES: 16
+  BACKBONE: 'resnet50'
+  PROBABILISTIC: True
+  ROI_HEAD_BUFFER_FREQ_TERM: 'inverse' # Choose between "inverse", "inverse_sqrt"
+  ROI_HEAD_BUFFER_MAX_WEIGHT: 15.0 # Maximum weight for the buffer
+  ANCHOR_SIZES: [[32], [64], [128], [256], [512]]
+  ANCHOR_ASPECT_RATIOS: [[0.33, 0.5, 0.75, 1.0, 2.0, 3.0]]
+
+MISC:
+  RUN_NAME: 'vindrcxr_s-r50-iou_30Epoch'
+  RESULTS_CSV: '../outputs/training_metric_logs'
+  SAVE_MODEL_PATH: '../outputs/saved_models/vindrcxr/1d_gaussian_softlabels'
+  EVALUATION_RESULTS_DIR: '../outputs/vindrcxr/1d_gaussian_softlabels/evaluation_results'
+  PRETRAINED_WEIGHTS: ''
+  FROZEN_LAYERS: []
+  NO_CUDA: False
+
+TRAIN:
+  BASE_LR_BBOX: 0.0008
+  BASE_LR_CLASS: 0.0005
+  BASE_LR: 0.0005
+  BOX_REG_LOSS_WEIGHT: 1.0
+  SCHEDULER: 'secondary_scheduler'
+  MILESTONES: [20, 25]
+  GAMMA: 0.5
+  BATCH_SIZE: 4
+  OVERFIT_BATCHES: 0
+  NUM_EPOCHS: 30
+  EARLY_STOPPING: False
+
+LIGHTNING:
+  ACCELERATOR: 'cuda'
+  PRECISION: 32
+  DETERMINISTIC: False
+  NUM_SANITY_VAL_STEPS: 0
+  ENABLE_CHECKPOINTING: False
+  ENABLE_PROGRESS_BAR: True
+  ACCUMULATE_GRAD_BATCHES: 1
+
+AUGMENTATION:
+  HORIZONTAL_FLIP_PROB: 0.5 # 0.5 (float)
+  ROTATION_DEGREES: 10 # 10 (int)
+  BRIGHTNESS_RANGE: (0.9, 1.1)
+  CONTRAST_RANGE: (0.9, 1.1)
+  NOISE_STD: 0.03 #0,04 (float)
+  RARE_CLASS_INDICES: [3, 4, 6, 7, 8, 14]
+  RARE_CLASS_AUGMENT_PROB: 0.7 # 0.7 (float)
+  COMMON_CLASS_AUGMENT_PROB: 0.2 #0.2 (float)

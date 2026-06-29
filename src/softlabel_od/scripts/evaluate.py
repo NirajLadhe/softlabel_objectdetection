@@ -27,6 +27,110 @@ METRIC_RUNNERS = {
     "lrp": evaluate_lrp,
 }
 
+NO_FINDING_CLASS_ID = 1
+
+PRED_ALIGNED_FIELDS = (
+    "boxes",
+    "labels",
+    "scores",
+    "bbox_stds",
+    "bbox_means",
+    "class_probs",
+    "class_scores",
+)
+
+GT_ALIGNED_FIELDS = (
+    "boxes",
+    "labels",
+    "gt_class_probs",
+    "gt_stds",
+)
+
+
+def _filter_entry_rows(entry, keep_mask, aligned_fields):
+    """Filter row-aligned arrays in a prediction/GT dict while preserving metadata."""
+    filtered = dict(entry)
+    keep_mask = np.asarray(keep_mask, dtype=bool)
+
+    for key in aligned_fields:
+        if key not in filtered:
+            continue
+
+        value = filtered[key]
+        if value is None:
+            continue
+
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            continue
+
+        if arr.shape[0] == keep_mask.shape[0]:
+            filtered[key] = arr[keep_mask]
+
+    return filtered
+
+
+def apply_no_finding_eval_policy(
+    predictions,
+    ground_truths,
+    *,
+    policy: str,
+    no_finding_class_id: int = NO_FINDING_CLASS_ID,
+):
+    """
+    Eval-only No-Finding handling.
+
+    policy="keep": leave predictions/GT unchanged.
+    policy="drop": remove class-1 No-Finding rows from both predictions and GT.
+    """
+    if policy == "keep":
+        return predictions, ground_truths
+
+    if policy != "drop":
+        raise ValueError(f"Unsupported no-finding eval policy: {policy}")
+
+    filtered_predictions = []
+    filtered_ground_truths = []
+
+    for pred, gt in zip(predictions, ground_truths):
+        pred_labels = np.asarray(pred.get("labels", []))
+        gt_labels = np.asarray(gt.get("labels", []))
+
+        pred_keep = pred_labels != no_finding_class_id
+        gt_keep = gt_labels != no_finding_class_id
+
+        filtered_predictions.append(
+            _filter_entry_rows(pred, pred_keep, PRED_ALIGNED_FIELDS)
+        )
+        filtered_ground_truths.append(
+            _filter_entry_rows(gt, gt_keep, GT_ALIGNED_FIELDS)
+        )
+
+    return filtered_predictions, filtered_ground_truths
+
+def resolve_metric_types(metric_types: list[str]) -> list[str]:
+    """Expand 'all', validate names, and deduplicate while preserving order."""
+    if not metric_types:
+        return ["default"]
+
+    if "all" in metric_types:
+        if len(metric_types) > 1:
+            raise ValueError(
+                "'all' cannot be combined with other metric types. "
+                f"Got: {metric_types}"
+            )
+        return list(METRIC_RUNNERS.keys())
+
+    resolved = []
+    for name in metric_types:
+        if name not in METRIC_RUNNERS:
+            raise ValueError(
+                f"Metric '{name}' is not implemented. "
+                f"Available metrics: {sorted(METRIC_RUNNERS)}"
+            )
+        if name not in resolved:
+            resolved.append(name)
+    return resolved
 
 def evaluate(args):
     cfg = get_cfg_from_file(args.config)
@@ -65,18 +169,23 @@ def evaluate(args):
         backbone=args.backbone,
         probabilistic=probabilistic,
         device=device,
-        # anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
-        # anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS * len(cfg.MODEL.ANCHOR_SIZES),
+        anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
     )
 
     predictions, ground_truths = collect_predictions(model, test_loader, device=device, is_probabilistic=probabilistic)
     print(f"Collected predictions for {len(predictions)} images")
-
-    selected_metrics = (
-        list(METRIC_RUNNERS.keys())
-        if args.metric_type == "all"
-        else [args.metric_type]
+    predictions, ground_truths = apply_no_finding_eval_policy(
+        predictions,
+        ground_truths,
+        policy=args.no_finding_eval_policy,
     )
+    if args.no_finding_eval_policy == "drop":
+        print("No-Finding eval policy: dropped class_id=1 from predictions and ground truth")
+    else:
+        print("No-Finding eval policy: kept class_id=1 in predictions and ground truth")
+
+    selected_metrics = resolve_metric_types(args.metric_type)
 
     results = {}
 
@@ -127,7 +236,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained detection model")
     parser.add_argument("--config", type=str, default=None, help="Model initialization config file (.yaml)")
     parser.add_argument("--eval-tag", type=str, default=None, help="Evaluation tag for the results")
-    parser.add_argument("--metric-type", type=str, default="default", choices=["default", "tide", "pdq", "lrp", "all"], help="Which evaluation metric group to run.")
+    parser.add_argument("--metric-type", type=str, nargs="+", default=["default"], choices=["default", "tide", "pdq", "lrp", "all"], help="Which evaluation metric group to run.")
     parser.add_argument("--weights", type=str, required=True, help="Path to model weights (.pth)")
     parser.add_argument("--gmm-type", type=str, default="1D", choices=["1D", "HARD_LABEL"])
     parser.add_argument("--dataset", type=str, default="vindrcxr", help="Registered dataset adapter name")
@@ -142,6 +251,17 @@ def main():
     parser.add_argument("--val-split-ratio", type=float, default=0.20)
     parser.add_argument("--num-workers", type=int, default=None, help="Number of workers for dataloader (0 = single-process)")
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument(
+        "--no-finding-eval-policy",
+        type=str,
+        default="keep",
+        choices=["keep", "drop"],
+        help=(
+            "Eval-only handling for class_id=1 No Finding. "
+            "'keep' leaves predictions/GT unchanged; "
+            "'drop' removes No-Finding rows from both predictions and GT."
+        ),
+    )
     args = parser.parse_args()
 
     cfg = get_cfg_from_file(args.config)

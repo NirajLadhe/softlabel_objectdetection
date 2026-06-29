@@ -238,7 +238,7 @@ class ProbabilisticRoIHeads(RoIHeads):
             pred_log_stds = 0.5 * pred_log_vars_delta                       # [N_pos, 4]
             gt_log_stds = torch.log(gt_stds_delta_safe)                      # [N_pos, 4]
             
-            LAMBDA_VAR = 1.0
+            LAMBDA_VAR = 2.0
             loss_box_var = torch.nn.functional.smooth_l1_loss(
                 pred_log_stds,
                 gt_log_stds,
