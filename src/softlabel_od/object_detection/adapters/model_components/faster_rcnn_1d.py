@@ -500,6 +500,11 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
     elif backbone_name == 'mobilenet':
         backbone = torchvision.models.mobilenet_v3_large(pretrained=pretrained).features
         backbone.out_channels = 960
+    
+    elif backbone_name in ('swin_t', 'swin_s', 'swin_b', 'swin_v2_t', 'swin_v2_s', 'swin_v2_b'):
+        from softlabel_od.object_detection.adapters.model_components.swin_fpn_backbone import swin_fpn_backbone
+        backbone = swin_fpn_backbone(backbone_name, pretrained=pretrained, out_channels=256)
+
         
     else:
         raise ValueError(f"Backbone '{backbone_name}' is not supported.")
