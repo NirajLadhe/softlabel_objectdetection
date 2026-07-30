@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--max-images', type=int, default=None)
     parser.add_argument('--iou-reliability', type=float, default=0.5)
     parser.add_argument('--no-finding-labels', type=str, nargs='*', default=['No finding', 'No findings'])
+    parser.add_argument('--dataset-name', type=str, default=None)
     args = parser.parse_args()
 
     if args.weights_csv is None:

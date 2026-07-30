@@ -151,6 +151,8 @@ def build_step4_command(cfg, paths) -> list:
         module = "softlabel_od.softlabel_generation.core.label_assembly.priors.calculate_priors_1d"
     elif gmm_mode == "2d":
         module = "softlabel_od.softlabel_generation.core.label_assembly.priors.calculate_priors_2d"
+    elif gmm_mode == "2d_theta":                                                # ADD
+        module = "softlabel_od.softlabel_generation.theta_2d.calculate_priors_theta"            # ADD
     else:
         raise ValueError(f"Invalid gmm_mode: {gmm_mode!r}")
 
@@ -187,6 +189,8 @@ def build_step5_command(cfg, paths) -> list:
         module = "softlabel_od.softlabel_generation.core.label_assembly.label_constructor.gmm_1d"
     elif gmm_mode == "2d":
         module = "softlabel_od.softlabel_generation.core.label_assembly.label_constructor.gmm_2d"
+    elif gmm_mode == "2d_theta":                                                # ADD
+        module = "softlabel_od.softlabel_generation.theta_2d.gmm_theta"          # ADD
     else:
         raise ValueError(f"Invalid gmm_mode: {gmm_mode!r}")
 

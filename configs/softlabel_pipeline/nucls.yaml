@@ -10,7 +10,7 @@ DATASET:
   image_id_key: "file_name"
 
 PIPELINE:
-  gmm_mode: "1d"
+  gmm_mode: "2d_theta"
   clustering_method: "iou"
   iou_threshold: 0.25            # paper-validated threshold for nucleus-scale annotations
   iomin_threshold: 0.25
@@ -23,6 +23,6 @@ PIPELINE:
   reliability_method: "shm"
 
 PATHS:
-  input_csv: "outputs/nucls_transform_0.001/nucls_canonical.csv"
-  output_dir: "outputs/nucls_transform_0.001"
-  reliability_dir: "outputs/nucls_transform_0.001/reliability"
+  input_csv: "outputs/nucls_2D_theta/nucls_canonical.csv"
+  output_dir: "outputs/nucls_2D_theta"
+  reliability_dir: "outputs/nucls_2D_theta/reliability"

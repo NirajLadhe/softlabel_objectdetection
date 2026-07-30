@@ -71,9 +71,10 @@ def main():
     parser.add_argument("--semantic-map", type=str, default=None)
     parser.add_argument("--iou-reliability", type=float, default=0.5)
     parser.add_argument("--no-finding-labels", type=str, nargs="*",
-                        default=["No finding", "No findings"])
-    parser.add_argument("--absent-rater-vote", dest="absent_rater_vote", action="store_true")
-    parser.add_argument("--no-absent-rater-vote", dest="absent_rater_vote", action="store_false")
+                        default=["No finding", "No findings"]),
+    parser.add_argument("--image-id-key", type=str, default="file_name"),
+    parser.add_argument("--absent-rater-vote", dest="absent_rater_vote", action="store_true"),
+    parser.add_argument("--no-absent-rater-vote", dest="absent_rater_vote", action="store_false"),
     parser.set_defaults(absent_rater_vote=False)
 
     args = parser.parse_args()

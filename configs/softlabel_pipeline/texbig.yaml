@@ -9,7 +9,7 @@ DATASET:
   absent_rater_vote: false       
 
 PIPELINE:
-  gmm_mode: "1d"
+  gmm_mode: "2d"
   clustering_method: "iou"
   iou_threshold: 0.5
   iomin_threshold: 0.5
