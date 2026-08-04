@@ -20,6 +20,9 @@ from softlabel_od.object_detection.core.lightning.lightning_datamodule import (
 from softlabel_od.object_detection.core.lightning.lightning_callbacks import (
     ExportBestPthCallback,
 )
+from softlabel_od.object_detection.core.lightning.lightning_theta_module import (
+    SoftLabel2DThetaLightningModule,
+)
 
 _SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT  = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
@@ -36,6 +39,11 @@ def _get_module_class(label_mode: str):
             SoftLabel2DLightningModule,
         )
         return SoftLabel2DLightningModule
+    if label_mode == "soft_2d_theta":
+        from softlabel_od.object_detection.core.lightning.lightning_theta_module import (
+            SoftLabel2DThetaLightningModule,
+        )
+        return SoftLabel2DThetaLightningModule
     if label_mode == "hard":
         from softlabel_od.object_detection.core.lightning.lightning_hard_module import (
             HardLabelLightningModule,
