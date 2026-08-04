@@ -51,6 +51,9 @@ def normalize_label_mode(
             "2d": "soft_2d",
             "soft2d": "soft_2d",
             "soft_2d": "soft_2d",
+            "theta_2d": "soft_2d_theta",
+            "2d_theta": "soft_2d_theta",
+            "soft_2d_theta": "soft_2d_theta",
             "hard": "hard",
             "hard_label": "hard",
         }
@@ -78,6 +81,8 @@ def label_mode_to_legacy_fields(label_mode: str) -> tuple[str, str | None]:
         return "soft", "1D"
     if label_mode == "soft_2d":
         return "soft", "2D"
+    if label_mode == "soft_2d_theta":
+        return "soft", "2D_THETA"
     raise ValueError(f"Unsupported label mode: {label_mode}")
 
 class CanonicalDetectionDataset(DetectionDatasetPort):
@@ -243,6 +248,9 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             return self.is_placeholder_mean_box(spatial.get("mean"))
         if self.label_mode == "soft_2d":
             return self.is_placeholder_vertices(record.get("vertices"))
+        if self.label_mode == "soft_2d_theta":
+            theta = record.get("theta") or {}
+            return self.is_placeholder_mean_box(theta.get("mean"))
         return False
 
     def build_class_prob_vector(self, class_probs: Dict[str, float] | None) -> torch.Tensor:
@@ -557,6 +565,8 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             return self._process_1d_labels(image, labels, image_id)
         if self.label_mode == "soft_2d":
             return self._process_2d_labels(image, labels, image_id)
+        if self.label_mode == "soft_2d_theta":
+            return self._process_theta_2d_labels(image, labels, image_id)
         raise ValueError(f"Unsupported label mode: {self.label_mode}")
 
     def _process_hard_item(self, image, findings, image_id: str):
@@ -758,6 +768,87 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             "gt_covariances": gt_covariances,
             "gt_class_probs": class_probs,
             "image_id": self.build_image_id_tensor(image_id),
+        }
+        if self.transforms:
+            image, target = self.transforms(image, target)
+        return image, target
+
+    def _process_theta_2d_labels(self, image, labels, image_id: str):
+        boxes = []
+        gt_theta_mean = []
+        gt_theta_cov = []
+        class_probs = []
+        labels_tensor = []
+        annotation_weights_list = []
+        orig_w, orig_h = self.get_record_image_size(labels, image)
+
+        for label in labels:
+            theta = label.get("theta") or {}
+            mean = theta.get("mean")
+            cov = theta.get("covariance")
+            if not mean or not cov:
+                continue
+
+            if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) <= 1:
+                continue
+
+            x_mean = mean[0] * orig_w
+            y_mean = mean[1] * orig_h
+            w_mean = mean[2] * orig_w
+            h_mean = mean[3] * orig_h
+            boxes.append([x_mean, y_mean, x_mean + w_mean, y_mean + h_mean])
+
+            gt_theta_mean.append([mean[0], mean[1], mean[2], mean[3]])
+            gt_theta_cov.append(cov)
+
+            prob_vector = self.build_class_prob_vector(label.get("class_probs"))
+            class_probs.append(prob_vector)
+
+            original_annotations = label.get("original_annotations", [])
+            if original_annotations and self.rater_weights is not None:
+                rater_ids = [ann["rater_id"] for ann in original_annotations if "rater_id" in ann]
+                if rater_ids:
+                    weight = float(sum(self.rater_weights.get(rid, 0.5) for rid in rater_ids) / len(rater_ids))
+                else:
+                    bg_prob = prob_vector[0].item() + (prob_vector[self.class_to_idx["No Finding"]].item() if "No Finding" in self.class_to_idx else 0)
+                    weight = max(float(1.0 - bg_prob), 0.1)
+            else:
+                bg_prob = prob_vector[0].item() + (prob_vector[self.class_to_idx["No Finding"]].item() if "No Finding" in self.class_to_idx else 0)
+                weight = max(float(1.0 - bg_prob), 0.1)
+
+            if "No Finding" in self.class_to_idx:
+                nf_idx = self.class_to_idx["No Finding"]
+                if prob_vector[nf_idx].item() > 0.5:
+                    weight = weight * max(float(1.0 - prob_vector[nf_idx].item()), 0.1)
+
+            annotation_weights_list.append(weight)
+
+            dominant_disease = self.get_cluster_dominant_disease(label)
+            labels_tensor.append(dominant_disease if dominant_disease is not None else 1)
+
+        if not boxes:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels_tensor = torch.zeros((0,), dtype=torch.int64)
+            gt_theta_mean = torch.zeros((0, 4), dtype=torch.float32)
+            gt_theta_cov = torch.zeros((0, 4, 4), dtype=torch.float32)
+            class_probs = torch.zeros((0, self.get_num_classes()), dtype=torch.float32)
+            annotation_weight = torch.zeros((0,), dtype=torch.float32)
+        else:
+            boxes = torch.as_tensor(boxes, dtype=torch.float32)
+            labels_tensor = torch.as_tensor(labels_tensor, dtype=torch.int64)
+            gt_theta_mean = torch.as_tensor(gt_theta_mean, dtype=torch.float32)
+            gt_theta_cov = torch.as_tensor(gt_theta_cov, dtype=torch.float32)
+            class_probs = torch.stack(class_probs)
+            annotation_weight = torch.tensor(annotation_weights_list, dtype=torch.float32)
+
+        target = {
+            "boxes": boxes,
+            "labels": labels_tensor,
+            "gt_theta_mean": gt_theta_mean,
+            "gt_theta_cov": gt_theta_cov,
+            "gt_class_probs": class_probs,
+            "image_id": self.build_image_id_tensor(image_id),
+            "annotation_weight": annotation_weight,
         }
         if self.transforms:
             image, target = self.transforms(image, target)

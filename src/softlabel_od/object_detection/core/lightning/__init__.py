@@ -13,11 +13,14 @@ from softlabel_od.object_detection.core.lightning.lightning_hard_module import (
 from softlabel_od.object_detection.core.lightning.lightning_2d_module import (
     SoftLabel2DLightningModule,
 )
-
+from softlabel_od.object_detection.core.lightning.lightning_theta_module import (
+    SoftLabel2DThetaLightningModule,
+)
 __all__ = [
     "DetectionLightningDataModule",
     "BaseDetectionLightningModule",
     "SoftLabel1DLightningModule",
     "HardLabelLightningModule",
     "SoftLabel2DLightningModule",
+    "SoftLabel2DThetaLightningModule",
 ]

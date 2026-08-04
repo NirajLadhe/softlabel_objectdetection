@@ -845,3 +845,151 @@ def evaluate_default_metrics(
         print(f"  Avg Actual Err:   {bbox_cal['avg_actual_error']:.4f}")
         print(f"  Calibration Rat:  {bbox_cal['calibration_ratio']:.4f}")
     return results
+
+"""
+New functions to ADD to metrics.py -- append these, do not modify any
+existing function. compute_expected_iou and compute_bbox_uncertainty_calibration
+stay exactly as-is, serving the still-training 1D pipeline unchanged.
+
+CORRECTED VERSION: earlier draft assumed a flat 1:1 zip(preds, gts) where
+each entry was a single matched object. This was wrong -- confirmed from
+the real on_validation_epoch_end code (match_predictions_to_gt(pred["boxes"],
+pred["scores"], gt["boxes"], ...)) that each pred/gt dict represents ONE
+IMAGE with potentially MANY boxes, and matching between predicted and GT
+boxes happens WITHIN each image, not across the outer preds/gts lists.
+Both functions below now do that same per-image matching internally,
+following the identical pattern already used for avg_iou in the real
+on_validation_epoch_end.
+
+ASSUMPTION FLAGGED, NOT YET VERIFIED: match_predictions_to_gt's return
+format is inferred from its confirmed use ("for m in matches: total_ious
+.append(m[2])") as (pred_idx, gt_idx, iou) tuples -- a standard, common
+convention, but the function's actual source has not been seen. If this
+assumption is wrong, the indexing below (m[0], m[1]) needs correcting
+accordingly -- flagged here rather than silently trusted.
+"""
+
+try:
+    from softlabel_od.object_detection.core.evaluation.metrics import match_predictions_to_gt
+except ImportError:
+    match_predictions_to_gt = None  # allows standalone testing without the full package
+
+
+def _boxes_xyxy_to_theta(boxes_xyxy):
+    """[x1,y1,x2,y2] -> [x,y,w,h] (top-left format, matching theta convention)."""
+    boxes_xyxy = np.asarray(boxes_xyxy, dtype=np.float64)
+    x1, y1, x2, y2 = boxes_xyxy[:, 0], boxes_xyxy[:, 1], boxes_xyxy[:, 2], boxes_xyxy[:, 3]
+    return np.stack([x1, y1, x2 - x1, y2 - y1], axis=1)
+
+
+def compute_expected_iou_theta(preds, gts, num_samples=50, eps=1e-6, iou_threshold=0.5):
+    """
+    Theta-space counterpart of compute_expected_iou. For each image, match
+    predicted boxes to GT boxes (same convention as the real
+    on_validation_epoch_end's avg_iou computation), then for each matched
+    pair, Monte Carlo sample from the FULL 4x4 predicted covariance
+    (np.random.multivariate_normal, not independent per-axis draws) and
+    average the sampled boxes' IoU against the true GT box.
+
+    Args:
+        preds: list of per-IMAGE dicts, each with 'boxes' [N_pred,4] (xyxy),
+               'scores' [N_pred], 'bbox_means' [N_pred,4] (xyxy, same as
+               'boxes'), 'bbox_covs' [N_pred,4,4].
+        gts:   list of per-IMAGE dicts, each with 'boxes' [N_gt,4] (xyxy).
+        num_samples: Monte Carlo samples per matched prediction.
+        eps:   numerical floor for covariance regularisation before sampling.
+        iou_threshold: matching threshold, passed through to match_predictions_to_gt.
+
+    Returns:
+        float: mean expected IoU across all matched pairs, all images.
+    """
+    def theta_to_x1y1x2y2(theta):
+        x, y, w, h = theta
+        return np.array([x, y, x + w, y + h])
+
+    def iou_xyxy(box_a, box_b):
+        xa1, ya1, xa2, ya2 = box_a
+        xb1, yb1, xb2, yb2 = box_b
+        inter_x1, inter_y1 = max(xa1, xb1), max(ya1, yb1)
+        inter_x2, inter_y2 = min(xa2, xb2), min(ya2, yb2)
+        inter_w = max(0.0, inter_x2 - inter_x1)
+        inter_h = max(0.0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+        area_a = max(0.0, xa2 - xa1) * max(0.0, ya2 - ya1)
+        area_b = max(0.0, xb2 - xb1) * max(0.0, yb2 - yb1)
+        union = area_a + area_b - inter_area
+        return inter_area / union if union > 0 else 0.0
+
+    all_expected_ious = []
+    for pred, gt in zip(preds, gts):
+        if "bbox_covs" not in pred or len(pred["boxes"]) == 0 or len(gt["boxes"]) == 0:
+            continue
+
+        matches, _, _ = match_predictions_to_gt(
+            pred["boxes"], pred["scores"], gt["boxes"], iou_threshold=iou_threshold
+        )
+        gt_theta = _boxes_xyxy_to_theta(gt["boxes"])
+        pred_means_theta = _boxes_xyxy_to_theta(pred["bbox_means"])
+
+        for m in matches:
+            pred_idx, gt_idx = int(m[0]), int(m[1])
+            mean_theta = pred_means_theta[pred_idx]
+            cov_theta = np.asarray(pred["bbox_covs"][pred_idx], dtype=np.float64) + eps * np.eye(4)
+            true_box_xyxy = gt["boxes"][gt_idx]
+
+            samples = np.random.multivariate_normal(mean_theta, cov_theta, size=num_samples)
+            ious = [iou_xyxy(theta_to_x1y1x2y2(s), true_box_xyxy) for s in samples]
+            all_expected_ious.append(float(np.mean(ious)))
+
+    return float(np.mean(all_expected_ious)) if all_expected_ious else 0.0
+
+
+def compute_nees_theta(preds, gts, eps=1e-6, iou_threshold=0.5):
+    """
+    Multivariate calibration check -- theta-space generalisation of
+    compute_bbox_uncertainty_calibration's scalar Calibration Ratio.
+    Matches predicted to GT boxes per image (identical convention to
+    compute_expected_iou_theta above and to the real avg_iou computation),
+    then computes NEES for each matched pair:
+
+        NEES = (gt_theta - pred_theta)^T . Sigma_pred^-1 . (gt_theta - pred_theta)
+
+    For a well-calibrated 4-dimensional prediction, mean NEES should
+    converge to 4.0 (theta's dimensionality) -- NOT to 0.
+
+    Args:
+        preds: list of per-IMAGE dicts (see compute_expected_iou_theta).
+        gts:   list of per-IMAGE dicts (see compute_expected_iou_theta).
+        eps:   numerical floor before inversion.
+        iou_threshold: matching threshold.
+
+    Returns:
+        dict: {"mean_nees": float, "nees_values": list[float]}
+    """
+    nees_values = []
+    for pred, gt in zip(preds, gts):
+        if "bbox_covs" not in pred or len(pred["boxes"]) == 0 or len(gt["boxes"]) == 0:
+            continue
+
+        matches, _, _ = match_predictions_to_gt(
+            pred["boxes"], pred["scores"], gt["boxes"], iou_threshold=iou_threshold
+        )
+        gt_theta = _boxes_xyxy_to_theta(gt["boxes"])
+        pred_means_theta = _boxes_xyxy_to_theta(pred["bbox_means"])
+
+        for m in matches:
+            pred_idx, gt_idx = int(m[0]), int(m[1])
+            pred_mean = pred_means_theta[pred_idx]
+            pred_cov = np.asarray(pred["bbox_covs"][pred_idx], dtype=np.float64) + eps * np.eye(4)
+            true_theta = gt_theta[gt_idx]
+
+            diff = true_theta - pred_mean
+            try:
+                cov_inv = np.linalg.inv(pred_cov)
+            except np.linalg.LinAlgError:
+                continue
+
+            nees_values.append(float(diff @ cov_inv @ diff))
+
+    mean_nees = float(np.mean(nees_values)) if nees_values else 0.0
+    return {"mean_nees": mean_nees, "nees_values": nees_values}

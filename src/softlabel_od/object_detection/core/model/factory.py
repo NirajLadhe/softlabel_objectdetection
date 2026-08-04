@@ -15,20 +15,14 @@ Adding a new architecture
 """
 
 
-def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained=True, probabilistic=True, anchor_sizes=None, anchor_aspect_ratios=None):
+def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained=True,
+             probabilistic=True, anchor_sizes=None, anchor_aspect_ratios=None,
+             lambda_theta_mean=0.3, lambda_theta_cov=1.0,
+             pos_cls_weight=1.2, neg_cls_weight=0.8):
     """
-    Factory function to get the appropriate detection model.
-
-    Args:
-        num_classes:    Number of classes including background (e.g. 15 for VinDr-CXR).
-        model_type:     '1d', '2d', or 'hard'.
-        backbone_name:  'resnet50', 'resnet101', or 'mobilenet'.
-        pretrained:     Use ImageNet-pretrained backbone weights.
-        probabilistic:  Use probabilistic GMM head (only relevant for model_type='1d').
-        anchor_sizes:   Anchor sizes (list of lists).
-        anchor_aspect_ratios: Anchor aspect ratios (list of lists).
-    Returns:
-        A torch.nn.Module ready for training.
+    ... (existing docstring, add:)
+    lambda_theta_mean, lambda_theta_cov, pos_cls_weight, neg_cls_weight:
+        only used by model_type='theta_2d'; harmlessly ignored otherwise.
     """
     if model_type in ("1d", "1D"):
         from softlabel_od.object_detection.adapters.model_components.faster_rcnn_1d import get_model_1d
@@ -38,12 +32,17 @@ def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained
         from softlabel_od.object_detection.adapters.model_components.faster_rcnn_2d import get_model_2d
         return get_model_2d(num_classes, backbone_name, pretrained)
 
+    elif model_type in ("theta_2d", "2d_theta", "THETA_2D"):
+        from softlabel_od.object_detection.adapters.model_components.faster_rcnn_theta_2d import get_model_theta_2d
+        return get_model_theta_2d(
+            num_classes, backbone_name, pretrained, anchor_sizes, anchor_aspect_ratios,
+            lambda_theta_mean=lambda_theta_mean, lambda_theta_cov=lambda_theta_cov,
+            pos_cls_weight=pos_cls_weight, neg_cls_weight=neg_cls_weight,
+        )
+
     elif model_type in ("hard", "HARD_LABEL"):
         from softlabel_od.object_detection.adapters.model_components.faster_rcnn_1d import get_model_1d
         return get_model_1d(num_classes, backbone_name, pretrained, probabilistic=False, anchor_sizes=anchor_sizes, anchor_aspect_ratios=anchor_aspect_ratios)
 
     else:
-        raise ValueError(
-            f"Unknown model_type: '{model_type}'. "
-            "Supported values: '1d', '2d', 'hard'."
-        )
+        raise ValueError(f"Unknown model_type: '{model_type}'. Supported values: '1d', '2d', 'theta_2d', 'hard'.")

@@ -27,7 +27,7 @@ class BaseDetectionLightningModule(pl.LightningModule):
     """
     Args:
         cfg:        Frozen YACS config node.
-        model_type: '1d', '2d', or 'hard'.
+        model_type: '1d', '2d', 'theta_2d', or 'hard'.
     """
 
     def __init__(self, cfg, model_type: str):
@@ -44,6 +44,8 @@ class BaseDetectionLightningModule(pl.LightningModule):
             probabilistic=cfg.MODEL.PROBABILISTIC,
             anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
             anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
+            lambda_theta_mean=getattr(cfg.TRAIN, "LAMBDA_THETA_MEAN", 0.3),
+            lambda_theta_cov=getattr(cfg.TRAIN, "LAMBDA_THETA_COV", 1.0),
         )
 
     # ------------------------------------------------------------------
