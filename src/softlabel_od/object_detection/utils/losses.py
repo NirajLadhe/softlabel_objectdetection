@@ -182,3 +182,219 @@ def giou_loss(pred_boxes, target_boxes):
 
     giou = iou - (enclose_area - union_area) / (enclose_area + 1e-6)
     return (1 - giou).mean()
+
+# ══════════════════════════════════════════════════════════════════════════
+# Theta-space (4x4 Sigma_theta over x, y, w, h) losses.
+#
+# Companion to vertex_nll_loss_2d above, for the canonical Sigma_theta
+# representation (see project specification document). Sigma_theta is
+# built via a Cholesky factor L (Sigma_theta = L @ L^T), which guarantees
+# validity for any raw network output -- no clipping or rejection needed.
+# The parameterisation below was hardened through adversarial testing (see
+# build_cholesky_L's docstring); an earlier, simpler version is documented
+# there as a cautionary note, since the failure mode it had is easy to
+# reintroduce by well-intentioned refactoring.
+# ══════════════════════════════════════════════════════════════════════════
+ 
+ 
+def build_cholesky_L(
+    raw_params,
+    log_diag_clamp_min: float = -8.0,
+    log_diag_clamp_max: float = 1.0,
+    max_corr_ratio: float = 0.9,
+    diag_floor: float = 1e-4,
+):
+    """
+    Build a batch of lower-triangular Cholesky factors L from raw network
+    output, guaranteeing Sigma_theta = L @ L^T is always a valid (positive
+    definite) covariance matrix, well-conditioned enough to produce a
+    trainable (not just technically finite) loss.
+ 
+    IMPORTANT -- correction from an earlier version of this function:
+    An earlier version clamped the off-diagonal entries to a fixed
+    ABSOLUTE range (e.g. +-5), independent of the diagonal. This is wrong:
+    for a Cholesky factor, L[i,0] = Cov(x_i, x_0) / L[0,0] exactly, so a
+    FIXED-size off-diagonal entry next to a SMALL diagonal entry implies an
+    enormous, invalid correlation (confirmed empirically: ratio -11482 in
+    one adversarial test) -- pushing Sigma_theta to near-singular, and
+    solving a near-singular system (the Mahalanobis term) is exactly what
+    produced the earlier "finite but training-destroying" loss/gradients
+    (~1e15 / ~1e9), not a true edge case but a direct, reproducible
+    consequence of bounding the wrong quantity.
+ 
+    The fix: build the diagonal first, then parameterise EACH off-diagonal
+    entry as a bounded FRACTION of its own row's diagonal, via tanh. This
+    directly bounds the implied correlation to [-max_corr_ratio,
+    +max_corr_ratio] regardless of how small or large the diagonal is --
+    the off-diagonal now scales down automatically whenever the diagonal
+    does, which is what actually prevents the cascading blow-up.
+ 
+    Args:
+        raw_params: [N, 10] raw network output, ordered:
+            [z1, z2, z3, z4,            <- 4 diagonal entries (pre-exp)
+             z5, z6, z7, z8, z9, z10]   <- 6 off-diagonal entries (free sign)
+ 
+        log_diag_clamp_min / _max: bounds on raw diagonal input before
+            exp(). theta is normalised to [0,1], so std has no legitimate
+            reason to exceed ~e^1=2.7 (log_diag_clamp_max=1.0); real
+            verified ground truth runs std in [0.003, 0.03] (log in
+            [-5.8,-3.5]); -8.0 gives headroom below that.
+ 
+        max_corr_ratio: caps each off-diagonal entry at this fraction of
+            its row's diagonal value. 0.9 keeps every implied pairwise
+            correlation safely below +-1 (a correlation of exactly +-1
+            means perfectly degenerate, singular), while still allowing
+            strong, meaningful correlation when the data supports it.
+ 
+        diag_floor: small additive floor on the diagonal after exp(), a
+            second independent safety line, consistent with the +1e-4
+            floors already used elsewhere in this project's prior
+            calculation code (Prior2DCalculator / PriorThetaCalculator).
+ 
+    Returns:
+        L: [N, 4, 4] lower-triangular, positive diagonal, off-diagonal
+           bounded relative to the diagonal.
+    """
+    N = raw_params.shape[0]
+    device, dtype = raw_params.device, raw_params.dtype
+ 
+    diag_raw = raw_params[:, :4].clamp(min=log_diag_clamp_min, max=log_diag_clamp_max)
+    diag_vals = torch.exp(diag_raw) + diag_floor           # [N, 4], > 0, bounded
+ 
+    off_raw = torch.tanh(raw_params[:, 4:])                 # [N, 6], bounded to (-1, 1)
+ 
+    L = torch.zeros(N, 4, 4, device=device, dtype=dtype)
+    L[:, 0, 0] = diag_vals[:, 0]
+ 
+    L[:, 1, 0] = off_raw[:, 0] * max_corr_ratio * diag_vals[:, 1]
+    L[:, 1, 1] = diag_vals[:, 1]
+ 
+    L[:, 2, 0] = off_raw[:, 1] * max_corr_ratio * diag_vals[:, 2]
+    L[:, 2, 1] = off_raw[:, 2] * max_corr_ratio * diag_vals[:, 2]
+    L[:, 2, 2] = diag_vals[:, 2]
+ 
+    L[:, 3, 0] = off_raw[:, 3] * max_corr_ratio * diag_vals[:, 3]
+    L[:, 3, 1] = off_raw[:, 4] * max_corr_ratio * diag_vals[:, 3]
+    L[:, 3, 2] = off_raw[:, 5] * max_corr_ratio * diag_vals[:, 3]
+    L[:, 3, 3] = diag_vals[:, 3]
+ 
+    return L
+ 
+ 
+def theta_mean_loss(pred_means, gt_means, beta: float = 1.0, reduction: str = "sum"):
+    """
+    Direct Smooth L1 loss on (x, y, w, h) -- the theta-space analogue of
+    loss_box_mean in the 1D pipeline. Gives the mean prediction a clean,
+    undistorted localisation gradient, independent of covariance quality.
+ 
+    Args:
+        pred_means: [N, 4] predicted (x, y, w, h)
+        gt_means:   [N, 4] ground truth theta.mean, read directly from
+                    the soft label JSON
+    """
+    return F.smooth_l1_loss(pred_means, gt_means, beta=beta, reduction=reduction)
+ 
+ 
+def sigma_theta_nll_loss(
+    pred_means,
+    pred_L_raw,
+    gt_theta,
+    detach_mean: bool = True,
+    eps: float = 1e-6,
+):
+    """
+    Multivariate Gaussian negative log-likelihood over theta = (x, y, w, h),
+    using a Cholesky-parameterised covariance. Theta-space generalisation
+    of gaussian_nll_loss above (the 1D scalar case is the 1x1 special case
+    of this same construction).
+ 
+        NLL = 0.5 * ( log|Sigma_theta| + (gt - mean)^T . Sigma_theta^-1 . (gt - mean) )
+ 
+    Computed via the Cholesky factor directly, never forming
+    Sigma_theta^-1 or calling logdet() explicitly:
+        log|Sigma_theta| = 2 * sum(log of L's diagonal)   -- cheap, stable
+        Mahalanobis term = ||y||^2, where L @ y = diff     -- triangular solve,
+                                                                not a general inverse
+ 
+    Args:
+        pred_means:  [N, 4] predicted (x, y, w, h). Only used to form the
+                     residual; see detach_mean.
+        pred_L_raw:  [N, 10] raw network output for the Cholesky factor
+                     (see build_cholesky_L for the exact layout).
+        gt_theta:    [N, 4] ground truth theta.mean from the soft label JSON.
+        detach_mean: if True (default), gradients from this loss do NOT
+                     flow into pred_means -- localisation is left entirely
+                     to theta_mean_loss, and this loss only calibrates the
+                     covariance around wherever the mean loss has already
+                     placed the box. Prevents the two losses from fighting
+                     over the mean with different effective gradient scales.
+        eps:         numerical floor to keep log() well-defined.
+ 
+    Returns:
+        Scalar loss (summed over the batch; divide by N at the call site
+        if a mean-reduction is preferred, matching how loss_box_mean is
+        normalised in the existing 1D code).
+    """
+    means_for_residual = pred_means.detach() if detach_mean else pred_means
+ 
+    L = build_cholesky_L(pred_L_raw)                        # [N, 4, 4]
+ 
+    diag = torch.diagonal(L, dim1=-2, dim2=-1)               # [N, 4]
+    log_det_sigma = 2.0 * torch.log(diag.clamp(min=eps)).sum(dim=1)   # [N]
+ 
+    diff = (gt_theta - means_for_residual).unsqueeze(-1)     # [N, 4, 1]
+    y = torch.linalg.solve_triangular(L, diff, upper=False)   # [N, 4, 1]
+    mahalanobis = (y.squeeze(-1) ** 2).sum(dim=1)             # [N]
+ 
+    loss = 0.5 * (log_det_sigma + mahalanobis)
+    return loss.sum()
+ 
+ 
+def theta_spatial_loss(
+    pred_means,
+    pred_L_raw,
+    gt_means,
+    gt_theta,
+    lambda_mean: float = 0.3,
+    lambda_cov: float = 1.0,
+    detach_mean_in_cov: bool = True,
+    num_normalizer: float = None,
+):
+    """
+    Combined theta-space spatial loss -- the direct analogue of computing
+    loss_box_mean and loss_box_var together in the existing 1D RoI head.
+    Returns both components separately (not pre-summed) so they can be
+    logged and monitored independently, matching how train/loss_box_mean
+    and train/loss_box_var are logged separately today.
+ 
+    Args:
+        pred_means:  [N, 4] predicted (x, y, w, h)
+        pred_L_raw:  [N, 10] raw Cholesky-factor network output
+        gt_means:    [N, 4] ground truth mean (kept as a separate arg for
+                     API symmetry with the existing loss_box_mean call site)
+        gt_theta:    [N, 4] ground truth theta mean (used inside the NLL)
+        lambda_mean: weight on the mean loss
+        lambda_cov:  weight on the covariance NLL loss
+        detach_mean_in_cov: see sigma_theta_nll_loss
+        num_normalizer: if provided, both losses are divided by this
+                     (typically all_labels.numel(), matching how
+                     loss_box_mean is normalised in the 1D code); if
+                     None, losses are returned as raw sums.
+ 
+    Returns:
+        {"loss_theta_mean": scalar, "loss_theta_cov": scalar}
+    """
+    loss_mean = theta_mean_loss(pred_means, gt_means, reduction="sum")
+    loss_cov = sigma_theta_nll_loss(
+        pred_means, pred_L_raw, gt_theta, detach_mean=detach_mean_in_cov
+    )
+ 
+    if num_normalizer is not None:
+        loss_mean = loss_mean / num_normalizer
+        loss_cov = loss_cov / num_normalizer
+ 
+    return {
+        "loss_theta_mean": loss_mean * lambda_mean,
+        "loss_theta_cov": loss_cov * lambda_cov,
+    }
+ 

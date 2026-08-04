@@ -19,6 +19,7 @@ def get_cfg_defaults():
     _C.DATA.LABEL_FILE = ''
     _C.DATA.SOFT_LABEL_FILE_1D = os.path.join(project_root_ext, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json')
     _C.DATA.SOFT_LABEL_FILE_2D = os.path.join(project_root_ext, 'outputs/vindrcxr/2d_gaussian_softlabels/2DGMM_softLabels_iou0_5_with_priors.json')
+    _C.DATA.SOFT_LABEL_FILE_2D_THETA = os.path.join(project_root_ext, 'outputs/vindrcxr/2d_theta_gaussian_softlabels/2D_THETAGMM_softLabels_iou0_5_with_priors.json')
     _C.DATA.HARD_LABEL_FILE = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json')
     _C.DATA.GMM_TYPE = '1D'  # Choose between '1D' or '2D' or 'HARD_LABEL'
     _C.DATA.TEST_SPLIT_RATIO = 0.2 # For evaluation only
@@ -51,6 +52,8 @@ def get_cfg_defaults():
     _C.TRAIN.OVERFIT_BATCHES = 5
     _C.TRAIN.NUM_EPOCHS = 30
     _C.TRAIN.EARLY_STOPPING = False
+    _C.TRAIN.LAMBDA_THETA_MEAN = 0.3
+    _C.TRAIN.LAMBDA_THETA_COV = 1.0
     _C.TRAIN.MAP_EVAL_FREQ = 10  # compute val mAP every N epochs (and on final epoch)
 
     # Lightning-specific trainer knobs (do not duplicate TRAIN settings)
@@ -150,6 +153,8 @@ def resolve_label_mode(cfg):
         return "hard"
     if gmm_type == "2D":
         return "soft_2d"
+    if gmm_type == "2D_THETA":
+        return "soft_2d_theta"
     return "soft_1d"
 
 
@@ -164,6 +169,8 @@ def resolve_label_file(cfg):
         return cfg.DATA.HARD_LABEL_FILE
     if label_mode == "soft_2d":
         return cfg.DATA.SOFT_LABEL_FILE_2D
+    if label_mode == "soft_2d_theta":
+        return cfg.DATA.SOFT_LABEL_FILE_2D_THETA
     return cfg.DATA.SOFT_LABEL_FILE_1D
 
 
