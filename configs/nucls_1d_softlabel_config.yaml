@@ -1,6 +1,6 @@
 DATA:
   DATASET: 'nucls'
-  ROOT: '/media/klee_ro/public_datasets/nucls'
+  ROOT: 
   SOFT_LABEL_FILE_1D: '../outputs/nucls_transform_0.001/1d_gaussian_softlabels/1DGMM_softLabels_iou0_25_with_priors.json'
   # HARD_LABEL_FILE: '../outputs/nucls_transform_0.001/hard_labels/HardLabels_MajorityVote_iou0_25.json'
   GMM_TYPE: '1D'
@@ -27,7 +27,7 @@ MODEL:
   ANCHOR_ASPECT_RATIOS: [[0.5,0.75,1.0,1.5,2.0]]
 
 MISC:
-  RUN_NAME: 'nucls_softlabels_transform_0001_200epochs_soft_transform_13'
+  RUN_NAME: 'nucls_softlabels_transform_test_0.001'
   RESULTS_CSV: '../outputs/nucls_transform_0.001/training_metric_logs'
   SAVE_MODEL_PATH: '../outputs/saved_models/nucls_transform_0.001/1d_gaussian_softlabels'
   EVALUATION_RESULTS_DIR: '../outputs/nucls_transform_0.001/1d_gaussian_softlabels/evaluation_results'
@@ -48,7 +48,7 @@ TRAIN:
   GAMMA: 0.1
   BATCH_SIZE: 8
   OVERFIT_BATCHES: 0
-  NUM_EPOCHS: 150
+  NUM_EPOCHS: 100
   EARLY_STOPPING: False
   MAP_EVAL_FREQ: 5
 

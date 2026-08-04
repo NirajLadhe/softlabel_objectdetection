@@ -1,0 +1,99 @@
+DATA:
+  DATASET: 'nucls'
+  ROOT: 
+  # No DATA.LABEL_MODE field is set here, matching the real 1D config exactly --
+  # confirmed this means resolve_label_mode()'s GMM_TYPE fallback is the
+  # ACTUAL mechanism selecting the label mode, not a defensive fallback as
+  # assumed earlier. This line is therefore load-bearing:
+  GMM_TYPE: '2D_THETA'
+  SOFT_LABEL_FILE_2D_THETA: 
+  TEST_SPLIT_RATIO: 0.10
+  VAL_SPLIT_RATIO: 0.10
+  BALANCED_SAMPLER: True
+  RFS_THRESHOLD: 0.25
+  IGNORE_NOFINDING_IMAGES: False
+  DOWNWEIGHT_NOFINDING_IMAGES: False
+  NOFINDING_INCLUDE_FRACTION: 1.0
+  OPTIONS:
+    # Unchanged -- same reliability weights, same annotators, unrelated to
+    # spatial representation.
+    rater_weights_csv: 
+    image_extension: '.png'
+
+MODEL:
+  NUM_CLASSES: 14
+  BACKBONE: 'resnet50'
+  # NOTE: PROBABILISTIC is NOT used by get_model_theta_2d() -- confirmed its
+  # signature is (num_classes, backbone_name, pretrained, anchor_sizes,
+  # anchor_aspect_ratios), no probabilistic parameter at all. base_module.py
+  # still passes this unconditionally to the factory regardless of
+  # model_type, so it is harmlessly ignored for theta_2d, not an error --
+  # kept here only for consistency with the shared config schema.
+  PROBABILISTIC: True
+  # NOT YET WIRED INTO faster_rcnn_theta_2d.py -- ProbabilisticThetaRoIHeads
+  # has no per-class loss-weighting mechanism at all currently. These two
+  # fields are recorded here as the INTENDED values (matching the 1D config
+  # exactly) but will have NO EFFECT until faster_rcnn_theta_2d.py is
+  # extended with the equivalent of the 1D pipeline's class-weight buffer.
+  # Flagging explicitly rather than silently pretending this is connected.
+  ROI_HEAD_BUFFER_FREQ_TERM: 'inverse'
+  ROI_HEAD_BUFFER_MAX_WEIGHT: 14.0
+  ANCHOR_SIZES: [[8], [16], [32], [64], [128]]
+  ANCHOR_ASPECT_RATIOS: [[0.5,0.75,1.0,1.5,2.0]]
+
+MISC:
+  RUN_NAME: 'nucls_theta2d_transform_test_0.001'
+  RESULTS_CSV: '../outputs/nucls_2D_theta/training_metric_logs'
+  SAVE_MODEL_PATH: '../outputs/saved_models/nucls_2D_theta/2d_theta_gaussian_softlabels'
+  EVALUATION_RESULTS_DIR: '../outputs/nucls_2D_theta/2d_theta_gaussian_softlabels/evaluation_results'
+  PRETRAINED_WEIGHTS: ''
+  FROZEN_LAYERS: ['layer1']
+  NO_CUDA: False
+
+TRAIN:
+  BASE_LR_BBOX: 0.00015
+  BASE_LR_CLASS: 0.00015
+  BASE_LR: 0.00015
+  BOX_REG_LOSS_WEIGHT: 1.0
+  SCHEDULER: 'secondary_scheduler'
+  MILESTONES: [60,100,130]
+  GAMMA: 0.1
+  BATCH_SIZE: 8
+  OVERFIT_BATCHES: 2
+  NUM_EPOCHS: 2
+  EARLY_STOPPING: False
+  MAP_EVAL_FREQ: 5
+  # NOT YET WIRED IN -- see MODEL section note above. get_model_theta_2d()
+  # needs to accept and forward these to ProbabilisticThetaRoIHeads before
+  # these values have any effect; currently the class defaults (0.3, 1.0,
+  # same as LAMBDA_MEAN/LAMBDA_VAR's 1D values) are used regardless of what
+  # is set here.
+  LAMBDA_THETA_MEAN: 0.3
+  LAMBDA_THETA_COV: 1.0
+
+LIGHTNING:
+  ACCELERATOR: 'cuda'
+  PRECISION: 32
+  DETERMINISTIC: False
+  NUM_SANITY_VAL_STEPS: 0
+  ENABLE_CHECKPOINTING: True
+  ENABLE_PROGRESS_BAR: True
+  ACCUMULATE_GRAD_BATCHES: 1
+
+# Unchanged, identical to the 1D config -- augmentation is fully independent
+# of label representation.
+AUGMENTATION:
+  HORIZONTAL_FLIP_PROB: 0.5
+  VERTICAL_FLIP_PROB: 0.5
+  ROTATION_DEGREES: 90
+  BRIGHTNESS_RANGE: (0.8, 1.2)
+  CONTRAST_RANGE: (0.8, 1.2)
+  HUE_DELTA: 0.05
+  SATURATION_RANGE: (0.8, 1.2)
+  GAUSSIAN_BLUR_PROB: 0.3
+  RANDOM_CROP_PROB: 0.5
+  RANDOM_CROP_SCALE: (0.7, 1.0)
+  NOISE_STD: 0.03
+  RARE_CLASS_INDICES: [3, 5, 6, 8, 9, 10, 11, 12]
+  RARE_CLASS_AUGMENT_PROB: 0.7
+  COMMON_CLASS_AUGMENT_PROB: 0.2
