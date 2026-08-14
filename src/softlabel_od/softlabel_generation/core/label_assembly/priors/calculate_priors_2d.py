@@ -13,6 +13,7 @@ from softlabel_od.softlabel_generation.utils.clustering import (
 )
 from softlabel_od.softlabel_generation.utils.semantic_mapping import get_semantic_map
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def main():
     parser = argparse.ArgumentParser(
         description="Pre-compute class-specific covariance priors for 2D GMM soft labels."
@@ -31,13 +32,12 @@ def main():
     parser.add_argument('--max-images', type=int, default=None)
     parser.add_argument('--iou-reliability', type=float, default=0.5)
     parser.add_argument('--no-finding-labels', type=str, nargs='*', default=['No finding', 'No findings'])
+    parser.add_argument('--dataset-name', type=str, default='vindrcxr')
     args = parser.parse_args()
 
     if args.weights_csv is None:
-        raise ValueError(
-            "--weights-csv is required. Pass it explicitly or run via run_pipeline.py "
-            "which constructs the path from your dataset config."
-        )
+        safe_iou_str = str(args.iou_reliability).replace('.', '_')
+        args.weights_csv = os.path.join(PROJECT_ROOT, f'outputs/raters_reliability/annotator_reliability_scores_{args.dataset_name}_iou{safe_iou_str}.csv')
 
     if not os.path.exists(args.train_csv) or not os.path.exists(args.weights_csv):
         print(f"Error: Required file not found.")
