@@ -246,7 +246,7 @@ def main():
     parser.add_argument("--output", type=str, default=os.path.join(PROJECT_ROOT, "outputs/vindrcxr/evaluation_results"))
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-classes", type=int, default=16)
-    parser.add_argument("--backbone", type=str, default="resnet50", choices=["resnet50", "resnet101", "mobilenet"])
+    parser.add_argument("--backbone", type=str, default="resnet50", choices=["resnet50", "resnet101", "mobilenet", "swin_v2_b", "swin_v2_t"])
     parser.add_argument("--test-split-ratio", type=float, default=0.20)
     parser.add_argument("--val-split-ratio", type=float, default=0.20)
     parser.add_argument("--num-workers", type=int, default=None, help="Number of workers for dataloader (0 = single-process)")

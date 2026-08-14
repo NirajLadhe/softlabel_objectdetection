@@ -74,6 +74,13 @@ def main():
                         default=["No finding", "No findings"])
     parser.add_argument("--absent-rater-vote", dest="absent_rater_vote", action="store_true")
     parser.add_argument("--no-absent-rater-vote", dest="absent_rater_vote", action="store_false")
+    parser.add_argument("--image-id-key", type=str, default="file_name", choices=["file_name", "id"],
+        help="JSON image entry field used to build the image_id key. "
+            "Use 'file_name' (default, strips extension) for datasets like VinDr-CXR. "
+            "Use 'id' for COCO-native datasets like MultiOrg where the integer id "
+            "is the canonical identifier.",
+    )
+
     parser.set_defaults(absent_rater_vote=False)
 
     args = parser.parse_args()
@@ -104,6 +111,26 @@ def main():
         return
     print(f"  Loaded weights for {len(normalized_rater_weights)} annotators.")
 
+    print("Loading image metadata from JSON...")
+    with open(args.raters_json, "r") as f:
+        raters_json = json.load(f)
+
+    # Build image_id → metadata mapping.
+    # Strip the file extension generically so this works for .dicom, .jpg, etc.
+    image_metadata = {}
+    for img_entry in raters_json.get("images", []):
+        if args.image_id_key == "id":
+            image_id = str(img_entry.get("id"))
+        else:  # "file_name"
+            file_name = img_entry.get("file_name", "")
+            image_id = str(os.path.splitext(file_name)[0])
+        image_metadata[image_id] = {
+            "width": img_entry.get("width"),
+            "height": img_entry.get("height"),
+            "rater_list": img_entry.get("rater_list", []),
+        }
+    print(f"  Loaded metadata for {len(image_metadata)} images.")
+
     print("\nLoading dataset annotations...")
     subset_image_ids, subset_image_data = load_all_data_for_gmm(
         args.train_csv, args.raters_json, normalized_rater_weights
@@ -118,6 +145,7 @@ def main():
     soft_labels = []
 
     for image_id in tqdm(subset_image_ids, desc="Processing Images"):
+        image_id_str = str(image_id)
         all_annotations_for_image = subset_image_data[image_id]
         all_rater_ids_on_image = {
             ann["rater_id"] for ann in all_annotations_for_image if "rater_id" in ann
@@ -132,12 +160,16 @@ def main():
             semantic_map=semantic_map,
         )
 
+        img_meta = image_metadata.get(image_id_str, {})
+
         for cluster_idx, cluster_anns in enumerate(annotation_clusters):
             valid_anns = [a for a in cluster_anns if a["weight"] > 1e-6]
 
             if not valid_anns:
                 soft_labels.append({
                     "image_id": image_id,
+                    "image_width": img_meta.get("width"),
+                    "image_height": img_meta.get("height"),
                     "finding_id": cluster_idx,
                     "original_annotations": cluster_anns,
                     "vertices": None,
@@ -168,6 +200,8 @@ def main():
             if is_no_finding_cluster:
                 soft_labels.append({
                     "image_id": image_id,
+                    "image_width": img_meta.get("width"),
+                    "image_height": img_meta.get("height"),
                     "finding_id": cluster_idx,
                     "original_annotations": cluster_anns,
                     "vertices": {
@@ -201,6 +235,8 @@ def main():
 
             soft_labels.append({
                 "image_id": image_id,
+                "image_width": img_meta.get("width"),
+                "image_height": img_meta.get("height"),
                 "finding_id": cluster_idx,
                 "original_annotations": cluster_anns,
                 "vertices": vertex_results,
