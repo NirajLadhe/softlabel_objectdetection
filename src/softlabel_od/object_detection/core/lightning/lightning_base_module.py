@@ -45,7 +45,8 @@ class BaseDetectionLightningModule(pl.LightningModule):
             anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
             anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
             lambda_theta_mean=getattr(cfg.TRAIN, "LAMBDA_THETA_MEAN", 0.3),
-            lambda_theta_cov=getattr(cfg.TRAIN, "LAMBDA_THETA_COV", 1.0),
+            lambda_theta_cov=getattr(cfg.TRAIN, "LAMBDA_THETA_COV", 0.02),
+            lambda_theta_kl=getattr(cfg.TRAIN, "LAMBDA_THETA_KL", 0.0),
         )
 
     # ------------------------------------------------------------------
@@ -131,7 +132,7 @@ class BaseDetectionLightningModule(pl.LightningModule):
         for name, param in self.model.named_parameters():
             if not param.requires_grad:
                 continue
-            if "box_predictor.bbox_pred" in name or "box_predictor.bbox_pred_gmm" in name:
+            if "box_predictor.bbox_pred" in name or "box_predictor.bbox_pred_gmm" in name or "box_predictor.gmm_params" in name:
                 bbox_params.append(param)
             elif "box_predictor.cls_score" in name:
                 class_params.append(param)

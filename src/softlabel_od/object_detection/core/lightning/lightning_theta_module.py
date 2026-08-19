@@ -68,7 +68,14 @@ class SoftLabel2DThetaLightningModule(BaseDetectionLightningModule):
 
         loss_out = self(images, targets)
         loss_dict = self._unwrap_loss_dict(loss_out)
-        total_loss = sum(loss_dict.values())
+
+        LOSS_KEYS = {
+            "loss_probabilistic_classifier", "loss_theta_mean", "loss_theta_cov",
+            "loss_theta_kl", "loss_objectness", "loss_rpn_box_reg",
+        }
+        total_loss = sum(v for k, v in loss_dict.items() if k in LOSS_KEYS)
+
+        # total_loss = sum(v for k, v in loss_dict.items() if not k.endswith("_raw"))
 
         self.log("train/loss", total_loss, prog_bar=True, on_step=False, on_epoch=True)
         for k, v in loss_dict.items():
@@ -103,7 +110,12 @@ class SoftLabel2DThetaLightningModule(BaseDetectionLightningModule):
         val_rpn_obj = loss_dict.get("loss_objectness", torch.tensor(0.0, device=device))
         val_rpn_box = loss_dict.get("loss_rpn_box_reg", torch.tensor(0.0, device=device))
 
-        val_total_loss = sum(loss_dict.values()) if loss_dict else torch.tensor(0.0, device=device)
+        LOSS_KEYS = {
+            "loss_probabilistic_classifier", "loss_theta_mean", "loss_theta_cov",
+            "loss_theta_kl", "loss_objectness", "loss_rpn_box_reg",
+        }
+        val_total_loss = sum(v for k, v in loss_dict.items() if k in LOSS_KEYS) if loss_dict else torch.tensor(0.0, device=device)
+        # val_total_loss = sum(v for k, v in loss_dict.items() if not k.endswith("_raw")) if loss_dict else torch.tensor(0.0, device=device)
 
         self.log("val/loss", val_total_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("val/class_loss", val_class_loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
