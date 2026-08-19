@@ -937,6 +937,11 @@ def compute_expected_iou_theta(preds, gts, num_samples=50, eps=1e-6, iou_thresho
             cov_theta = np.asarray(pred["bbox_covs"][pred_idx], dtype=np.float64) + eps * np.eye(4)
             true_box_xyxy = gt["boxes"][gt_idx]
 
+            cov_theta = 0.5 * (cov_theta + cov_theta.T)
+            eigvals = np.linalg.eigvalsh(cov_theta)
+            if eigvals.min() < 0:
+                cov_theta = cov_theta + (-eigvals.min() + 1e-6) * np.eye(4)
+
             samples = np.random.multivariate_normal(mean_theta, cov_theta, size=num_samples)
             ious = [iou_xyxy(theta_to_x1y1x2y2(s), true_box_xyxy) for s in samples]
             all_expected_ious.append(float(np.mean(ious)))
