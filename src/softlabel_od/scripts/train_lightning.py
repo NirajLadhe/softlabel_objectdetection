@@ -63,7 +63,20 @@ def _get_history_logger(label_mode: str, cfg):
             HardJSONHistoryLogger,
         )
         return HardJSONHistoryLogger(cfg, print_summary=True)
-    # 2D: fall back to a minimal logger until a dedicated one is added
+    if label_mode == "soft_2d_theta":
+        # FIX: previously fell through to HardJSONHistoryLogger, which looks
+        # for hard-label key names theta's loss dict never produces --
+        # confirmed root cause of the "Class: nan, Reg: nan, mAP: nan"
+        # Epoch Summary output seen in every theta training run so far.
+        # ThetaJSONHistoryLogger reads theta's REAL logged keys, including
+        # val/nees -- absent from every history file before this fix.
+        from softlabel_od.object_detection.core.lightning.lightning_theta_metrics_logger import (
+            ThetaJSONHistoryLogger,
+        )
+        return ThetaJSONHistoryLogger(cfg, print_summary=True)
+    # 2D (vertex-based, non-theta): fall back to a minimal logger until a
+    # dedicated one is added -- unchanged from before, still a known,
+    # explicitly-acknowledged gap for that path specifically, not theta.
     from softlabel_od.object_detection.core.lightning.lightning_metric_logger_hard import (
         HardJSONHistoryLogger,
     )
@@ -103,6 +116,27 @@ def main():
     callbacks = [
         _get_history_logger(label_mode, cfg),
         ExportBestPthCallback(cfg),
+        # ADDED: purely additive TensorBoard logging of the LR schedule,
+        # no effect on training behaviour.
+        LearningRateMonitor(logging_interval="epoch"),
+        # ADDED: genuine Lightning-native checkpointing alongside
+        # ExportBestPthCallback's legacy .pth export. ExportBestPthCallback
+        # only saves raw model.state_dict() -- no optimizer/scheduler state,
+        # no epoch counter, so a saved .pth cannot RESUME a training run,
+        # only reload weights into a fresh model+optimizer. ModelCheckpoint
+        # saves full trainer state; save_last=True specifically enables
+        # `trainer.fit(model, datamodule=dm, ckpt_path=<last.ckpt>)` to
+        # resume exactly where an interrupted run (e.g. a SLURM time-limit
+        # kill mid-training) left off, a real and previously-uncovered gap.
+        ModelCheckpoint(
+            dirpath=ckpt_dir,
+            filename="epoch{epoch:02d}-step{step}",
+            monitor="val/loss",
+            mode="min",
+            save_top_k=3,
+            save_last=True,
+            every_n_epochs=1,
+        ),
     ]
 
     if cfg.TRAIN.EARLY_STOPPING:
@@ -130,7 +164,7 @@ def main():
         enable_progress_bar=cfg.LIGHTNING.ENABLE_PROGRESS_BAR,
         deterministic=cfg.LIGHTNING.DETERMINISTIC,
         precision=cfg.LIGHTNING.PRECISION,
-        gradient_clip_val=3.0, # From 5 to 3 for nucls
+        gradient_clip_val=cfg.LIGHTNING.GRADIENT_CLIP_VAL,
         gradient_clip_algorithm="norm",
         # Overfit is handled at the DataModule level, not here.
         # Leave overfit_batches=0 so Lightning doesn't override the dataloader.
