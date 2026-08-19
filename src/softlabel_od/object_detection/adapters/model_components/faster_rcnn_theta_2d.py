@@ -43,6 +43,7 @@ from torchvision.ops import MultiScaleRoIAlign
 from softlabel_od.object_detection.adapters.model_components.theta_box_coder import (
     build_jacobian,
     decode_theta_covariance,
+    propagate_theta_covariance,
     DEFAULT_BBOX_REG_WEIGHTS,
 )
 from softlabel_od.object_detection.utils.losses import (
@@ -106,7 +107,7 @@ class ProbabilisticThetaRoIHeads(RoIHeads):
     """
 
     def __init__(self, *args, pos_cls_weight=1.2, neg_cls_weight=0.8,
-                lambda_theta_mean=0.3, lambda_theta_cov=1.0,
+                lambda_theta_mean=0.3, lambda_theta_cov=1.0, lambda_theta_kl=0.0,
                 score_thresh=0.10, nms_thresh=0.17, detections_per_img=200,
                 bbox_reg_weights=DEFAULT_BBOX_REG_WEIGHTS, **kwargs):
         super().__init__(
@@ -121,6 +122,7 @@ class ProbabilisticThetaRoIHeads(RoIHeads):
         self.neg_cls_weight = neg_cls_weight
         self.lambda_theta_mean = lambda_theta_mean
         self.lambda_theta_cov = lambda_theta_cov
+        self.lambda_theta_kl = lambda_theta_kl
         self.bbox_reg_weights_tuple = bbox_reg_weights
 
     def forward(self, features, proposals, image_shapes, targets=None):
@@ -186,6 +188,41 @@ class ProbabilisticThetaRoIHeads(RoIHeads):
             num_classes = class_logits.shape[1]
             gmm_params_reshaped = gmm_params.view(-1, num_classes, 14)
 
+            # Gather gt_theta_px, proposals_px, gt_cov (normalised), and
+            # per-proposal image size -- in the SAME concatenation order
+            # as all_labels/all_reg_targets -- so they can be sliced by
+            # pathology_mask alongside pred_means/pred_L_raw/pos_reg_targets
+            # with guaranteed index alignment. Needed to transform gt_cov
+            # from normalised space into delta space via
+            # propagate_theta_covariance before it reaches the KL loss --
+            # confirmed necessary (see conversation): Sigma_pred lives in
+            # delta space, raw theta.covariance does not, and comparing
+            # them directly without this transform would be the same class
+            # of unit-mismatch bug already caught once in this project.
+            all_gt_theta_px, all_proposals_px, all_gt_cov_norm = [], [], []
+            all_img_w, all_img_h = [], []
+            for i, t in enumerate(targets):
+                m_idx = matched_idxs[i]
+                props_i = proposals[i]
+                gt_boxes_i = t["boxes"][m_idx]  # [n_props_i, 4] x1y1x2y2, pixel space
+                gt_theta_px_i = torch.stack([
+                    gt_boxes_i[:, 0], gt_boxes_i[:, 1],
+                    gt_boxes_i[:, 2] - gt_boxes_i[:, 0], gt_boxes_i[:, 3] - gt_boxes_i[:, 1],
+                ], dim=1)
+                gt_cov_i = t["gt_theta_cov"][m_idx]  # [n_props_i, 4, 4], NORMALISED
+                h_i, w_i = image_shapes[i]
+                all_gt_theta_px.append(gt_theta_px_i)
+                all_proposals_px.append(props_i)
+                all_gt_cov_norm.append(gt_cov_i)
+                all_img_w.append(torch.full((props_i.shape[0],), float(w_i), device=props_i.device))
+                all_img_h.append(torch.full((props_i.shape[0],), float(h_i), device=props_i.device))
+
+            all_gt_theta_px = torch.cat(all_gt_theta_px, dim=0)
+            all_proposals_px = torch.cat(all_proposals_px, dim=0)
+            all_gt_cov_norm = torch.cat(all_gt_cov_norm, dim=0)
+            all_img_w = torch.cat(all_img_w, dim=0)
+            all_img_h = torch.cat(all_img_h, dim=0)
+
             if pathology_mask.any():
                 pos_labels = all_labels[pathology_mask]
                 pos_gmm = gmm_params_reshaped[pathology_mask]
@@ -196,22 +233,64 @@ class ProbabilisticThetaRoIHeads(RoIHeads):
                 pred_L_raw = pos_gmm_selected[:, 4:]
                 pos_reg_targets = all_reg_targets[pathology_mask]
 
-                # gt_theta = pos_reg_targets (already delta-encoded by
-                # torchvision's own box coder) -- NOT a separately
-                # transformed GT covariance. See module docstring: the
-                # loss only ever needs the model's own predicted
-                # covariance plus a GT POINT, matching the 1D pattern
-                # exactly (gt_stds is unused in gaussian_nll_loss too).
+                # Slice the new parallel tensors by the SAME mask, then
+                # transform gt_cov to delta space before the loss ever sees it.
+                gt_theta_px_pos = all_gt_theta_px[pathology_mask]
+                proposals_px_pos = all_proposals_px[pathology_mask]
+                gt_cov_norm_pos = all_gt_cov_norm[pathology_mask]
+                img_w_pos = all_img_w[pathology_mask]
+                img_h_pos = all_img_h[pathology_mask]
+
+                gt_cov_delta_pos = propagate_theta_covariance(
+                    gt_cov_norm_pos, gt_theta_px_pos, proposals_px_pos,
+                    img_w_pos, img_h_pos, weights=self.bbox_reg_weights_tuple,
+                )
+
                 theta_losses_dict = theta_spatial_loss(
                     pred_means, pred_L_raw, pos_reg_targets, pos_reg_targets,
+                    gt_cov=gt_cov_delta_pos,
                     lambda_mean=self.lambda_theta_mean,
                     lambda_cov=self.lambda_theta_cov,
+                    lambda_kl=self.lambda_theta_kl,
                     detach_mean_in_cov=True,
-                    num_normalizer=float(all_labels.numel()),
+                    # num_normalizer=float(all_labels.numel()),
+                    num_normalizer=float(pathology_mask.sum()),
                 )
+                with torch.no_grad():
+                    L_pred_diag = build_cholesky_L(pred_L_raw)
+                    eye_diag = torch.eye(4, device=pred_L_raw.device, dtype=pred_L_raw.dtype).expand(
+                        pred_L_raw.shape[0], 4, 4
+                    )
+                    Sigma_pred_inv_diag = torch.cholesky_solve(eye_diag, L_pred_diag)
+                    diff_diag = (pos_reg_targets - pred_means).unsqueeze(-1)
+                    nees_delta_per_sample = (
+                        diff_diag.transpose(-1, -2) @ Sigma_pred_inv_diag @ diff_diag
+                    ).squeeze(-1).squeeze(-1)
+                    theta_losses_dict["nees_delta"] = nees_delta_per_sample.mean().detach()
+
+                    theta_losses_dict["diag_raw_max"] = pred_L_raw[:, :4].max().detach()
+                    theta_losses_dict["diag_clamp_saturation_frac"] = (
+                        (pred_L_raw[:, :4] >= 0.99).float().mean().detach()
+                    )
+                    Sigma_pred_diag_only = L_pred_diag @ L_pred_diag.transpose(-1, -2)
+                    diag_Sigma = torch.diagonal(Sigma_pred_diag_only, dim1=-2, dim2=-1)
+                    diff_flat = diff_diag.squeeze(-1)
+                    per_axis_z2 = (diff_flat ** 2) / diag_Sigma.clamp(min=1e-8)
+                    per_axis_mean = per_axis_z2.mean(dim=0)
+                    theta_losses_dict["nees_delta_x"] = per_axis_mean[0].detach()
+                    theta_losses_dict["nees_delta_y"] = per_axis_mean[1].detach()
+                    theta_losses_dict["nees_delta_w"] = per_axis_mean[2].detach()
+                    theta_losses_dict["nees_delta_h"] = per_axis_mean[3].detach()
             else:
                 zero = gmm_params.sum() * 0.0
-                theta_losses_dict = {"loss_theta_mean": zero, "loss_theta_cov": zero}
+                theta_losses_dict = {
+                    "loss_theta_mean": zero,
+                    "loss_theta_cov": zero,
+                    "loss_theta_kl": zero,
+                    "loss_theta_mean_raw": zero.detach(),
+                    "loss_theta_cov_raw": zero.detach(),
+                    "loss_theta_kl_raw": zero.detach(),
+                }
 
             losses = {
                 "loss_probabilistic_classifier": loss_cls,
@@ -265,6 +344,8 @@ class ProbabilisticThetaRoIHeads(RoIHeads):
                 sigma_delta_pred, pred_theta_px, proposals_cat,
                 weights=self.bbox_reg_weights_tuple,
             )
+            sigma_px_pred = 0.5 * (sigma_px_pred + sigma_px_pred.transpose(-1, -2))
+            sigma_px_pred = sigma_px_pred + 1e-6 * torch.eye(4, device=sigma_px_pred.device, dtype=sigma_px_pred.dtype)
 
             pred_scores_max, pred_labels_final = pred_scores.max(dim=1)
 
@@ -272,23 +353,55 @@ class ProbabilisticThetaRoIHeads(RoIHeads):
             scores_split = pred_scores_max.split(boxes_per_image, dim=0)
             labels_split = pred_labels_final.split(boxes_per_image, dim=0)
             covs_split = sigma_px_pred.split(boxes_per_image, dim=0)
+            covs_delta_split = sigma_delta_pred.split(boxes_per_image, dim=0)
             class_probs_split = pred_scores.split(boxes_per_image, dim=0)
+            proposals_split = proposals_cat.split(boxes_per_image, dim=0)
+            pred_means_delta_split = pred_means_delta.split(boxes_per_image, dim=0)
 
-            for boxes_i, scores_i, labels_i, covs_i, cprobs_i in zip(
-                boxes_split, scores_split, labels_split, covs_split, class_probs_split
+            for boxes_i, scores_i, labels_i, covs_i, covs_delta_i, proposals_i, pred_delta_i, cprobs_i in zip(
+                boxes_split, scores_split, labels_split, covs_split, covs_delta_split,
+                proposals_split, pred_means_delta_split, class_probs_split
             ):
                 keep = scores_i > self.score_thresh
                 boxes_i, scores_i = boxes_i[keep], scores_i[keep]
-                labels_i, covs_i, cprobs_i = labels_i[keep], covs_i[keep], cprobs_i[keep]
+                labels_i, covs_i, covs_delta_i, proposals_i, pred_delta_i, cprobs_i = (
+                    labels_i[keep], covs_i[keep], covs_delta_i[keep],
+                    proposals_i[keep], pred_delta_i[keep], cprobs_i[keep]
+                )
 
                 keep_nms = torchvision.ops.nms(boxes_i, scores_i, self.nms_thresh)
                 keep_nms = keep_nms[: self.detections_per_img]
 
+                final_boxes = boxes_i[keep_nms]
+                final_covs_px = covs_i[keep_nms]
+                final_covs_delta = covs_delta_i[keep_nms]
+                final_proposals = proposals_i[keep_nms]
+
+                if final_boxes.shape[0] > 0:
+                    final_theta_px = torch.stack([
+                        final_boxes[:, 0], final_boxes[:, 1],
+                        final_boxes[:, 2] - final_boxes[:, 0],
+                        final_boxes[:, 3] - final_boxes[:, 1],
+                    ], dim=1)
+                    sigma_px_check = decode_theta_covariance(
+                        final_covs_delta, final_theta_px, final_proposals,
+                        weights=self.bbox_reg_weights_tuple,
+                    )
+                    max_diff = (sigma_px_check - final_covs_px).abs().max().item()
+                    is_close = torch.allclose(sigma_px_check, final_covs_px, atol=1e-3, rtol=1e-3)
+                    if not is_close:
+                        print(f"WARNING: post-filtering self-consistency check FAILED, max_diff={max_diff}")
+                    assert is_close, \
+                        f"Decoded covariance inconsistent AFTER filtering! max_diff={max_diff}"
+
                 result.append({
-                    "boxes": boxes_i[keep_nms],
+                    "boxes": final_boxes,
                     "scores": scores_i[keep_nms],
                     "labels": labels_i[keep_nms],
-                    "bbox_covs": covs_i[keep_nms],
+                    "bbox_covs": final_covs_px,
+                    "bbox_covs_delta": final_covs_delta,
+                    "proposal_boxes": final_proposals,
+                    "pred_means_delta": pred_delta_i[keep_nms],
                     "class_probs": cprobs_i[keep_nms],
                 })
 
@@ -300,15 +413,10 @@ class ProbabilisticThetaRoIHeads(RoIHeads):
 # ══════════════════════════════════════════════════════════════════════
 
 def get_model_theta_2d(
-    num_classes,
-    backbone_name="resnet50",
-    pretrained=True,
-    anchor_sizes=None,
-    anchor_aspect_ratios=None,
-    lambda_theta_mean=0.3,
-    lambda_theta_cov=1.0,
-    pos_cls_weight=1.2,
-    neg_cls_weight=0.8,
+    num_classes, backbone_name="resnet50", pretrained=True,
+    anchor_sizes=None, anchor_aspect_ratios=None,
+    lambda_theta_mean=0.3, lambda_theta_cov=0.02, lambda_theta_kl=0.0,
+    pos_cls_weight=1.2, neg_cls_weight=0.8,
 ):
     """
     Build a probabilistic Faster R-CNN with the 4x4 Sigma_theta head.
@@ -329,8 +437,29 @@ def get_model_theta_2d(
     """
     backbone = resnet_fpn_backbone(backbone_name, pretrained=pretrained, trainable_layers=3)
 
-    anchor_sizes = anchor_sizes or ((8,), (16,), (32,), (64,), (128,))
-    aspect_ratios = anchor_aspect_ratios or ((0.5, 0.75, 1.0, 1.5, 2.0),) * len(anchor_sizes)
+    # torchvision's AnchorGenerator strictly requires Tuple[Tuple[int]] /
+    # Tuple[Tuple[float]] and asserts on type -- NOT just matching length.
+    # Config-sourced anchor_sizes/anchor_aspect_ratios arrive as lists of
+    # lists (YAML has no native tuple type), which fail this assert even
+    # though the VALUES are correct. The `or` fallback below only produces
+    # the correct type for the None-default case; anything passed in from
+    # config needs explicit conversion too. Missed in earlier testing,
+    # which only ever exercised the None-default path or manually-built
+    # tuples -- never a real YAML-sourced list-of-lists.
+    if anchor_sizes is None:
+        anchor_sizes = ((8,), (16,), (32,), (64,), (128,))
+    else:
+        anchor_sizes = tuple(tuple(s) for s in anchor_sizes)
+
+    if anchor_aspect_ratios is None:
+        aspect_ratios = ((0.5, 0.75, 1.0, 1.5, 2.0),) * len(anchor_sizes)
+    else:
+        aspect_ratios = tuple(tuple(a) for a in anchor_aspect_ratios)
+        if len(aspect_ratios) == 1 and len(anchor_sizes) > 1:
+            # Matches the 1D config's convention: a single aspect-ratio
+            # tuple in the YAML (one row) applied to every FPN level.
+            aspect_ratios = aspect_ratios * len(anchor_sizes)
+
     anchor_generator = AnchorGenerator(sizes=anchor_sizes, aspect_ratios=aspect_ratios)
 
     roi_pooler = MultiScaleRoIAlign(
@@ -382,6 +511,7 @@ def get_model_theta_2d(
         neg_cls_weight=neg_cls_weight,
         lambda_theta_mean=lambda_theta_mean,
         lambda_theta_cov=lambda_theta_cov,
+        lambda_theta_kl=lambda_theta_kl,
     )
 
     return model
