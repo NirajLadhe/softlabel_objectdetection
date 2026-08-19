@@ -17,11 +17,11 @@ Adding a new architecture
 
 def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained=True,
              probabilistic=True, anchor_sizes=None, anchor_aspect_ratios=None,
-             lambda_theta_mean=0.3, lambda_theta_cov=1.0,
+             lambda_theta_mean=0.3, lambda_theta_cov=0.02, lambda_theta_kl=0.0,
              pos_cls_weight=1.2, neg_cls_weight=0.8):
     """
     ... (existing docstring, add:)
-    lambda_theta_mean, lambda_theta_cov, pos_cls_weight, neg_cls_weight:
+    lambda_theta_mean, lambda_theta_cov, lambda_theta_kl, pos_cls_weight, neg_cls_weight:
         only used by model_type='theta_2d'; harmlessly ignored otherwise.
     """
     if model_type in ("1d", "1D"):
@@ -37,7 +37,7 @@ def get_model(num_classes, model_type="1d", backbone_name="resnet50", pretrained
         return get_model_theta_2d(
             num_classes, backbone_name, pretrained, anchor_sizes, anchor_aspect_ratios,
             lambda_theta_mean=lambda_theta_mean, lambda_theta_cov=lambda_theta_cov,
-            pos_cls_weight=pos_cls_weight, neg_cls_weight=neg_cls_weight,
+            lambda_theta_kl=lambda_theta_kl, pos_cls_weight=pos_cls_weight, neg_cls_weight=neg_cls_weight,
         )
 
     elif model_type in ("hard", "HARD_LABEL"):

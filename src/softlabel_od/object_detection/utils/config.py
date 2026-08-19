@@ -53,7 +53,8 @@ def get_cfg_defaults():
     _C.TRAIN.NUM_EPOCHS = 30
     _C.TRAIN.EARLY_STOPPING = False
     _C.TRAIN.LAMBDA_THETA_MEAN = 0.3
-    _C.TRAIN.LAMBDA_THETA_COV = 1.0
+    _C.TRAIN.LAMBDA_THETA_COV = 0.02
+    _C.TRAIN.LAMBDA_THETA_KL = 0.0
     _C.TRAIN.MAP_EVAL_FREQ = 10  # compute val mAP every N epochs (and on final epoch)
 
     # Lightning-specific trainer knobs (do not duplicate TRAIN settings)
@@ -67,6 +68,7 @@ def get_cfg_defaults():
     _C.LIGHTNING.ENABLE_CHECKPOINTING = False
     _C.LIGHTNING.ENABLE_PROGRESS_BAR = True
     _C.LIGHTNING.ACCUMULATE_GRAD_BATCHES = 1
+    _C.LIGHTNING.GRADIENT_CLIP_VAL = 3.0
 
     # Augmentation settings
     _C.AUGMENTATION = CN()
