@@ -42,7 +42,7 @@ MODEL:
   ANCHOR_ASPECT_RATIOS: [[0.5,0.75,1.0,1.5,2.0]]
 
 MISC:
-  RUN_NAME: 'nucls_theta2d_transform_test_0.001'
+  RUN_NAME: 'nucls_theta2d_overfit_test_2'
   RESULTS_CSV: '../outputs/nucls_2D_theta/training_metric_logs'
   SAVE_MODEL_PATH: '../outputs/saved_models/nucls_2D_theta/2d_theta_gaussian_softlabels'
   EVALUATION_RESULTS_DIR: '../outputs/nucls_2D_theta/2d_theta_gaussian_softlabels/evaluation_results'
@@ -60,7 +60,7 @@ TRAIN:
   GAMMA: 0.1
   BATCH_SIZE: 8
   OVERFIT_BATCHES: 2
-  NUM_EPOCHS: 2
+  NUM_EPOCHS: 40
   EARLY_STOPPING: False
   MAP_EVAL_FREQ: 5
   # NOT YET WIRED IN -- see MODEL section note above. get_model_theta_2d()
@@ -68,8 +68,9 @@ TRAIN:
   # these values have any effect; currently the class defaults (0.3, 1.0,
   # same as LAMBDA_MEAN/LAMBDA_VAR's 1D values) are used regardless of what
   # is set here.
-  LAMBDA_THETA_MEAN: 0.3
+  LAMBDA_THETA_MEAN: 0.4
   LAMBDA_THETA_COV: 1.0
+  LAMBDA_THETA_KL: 0.0
 
 LIGHTNING:
   ACCELERATOR: 'cuda'
@@ -79,6 +80,7 @@ LIGHTNING:
   ENABLE_CHECKPOINTING: True
   ENABLE_PROGRESS_BAR: True
   ACCUMULATE_GRAD_BATCHES: 1
+  GRADIENT_CLIP_VAL: 3.0
 
 # Unchanged, identical to the 1D config -- augmentation is fully independent
 # of label representation.
