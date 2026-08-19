@@ -200,7 +200,7 @@ def giou_loss(pred_boxes, target_boxes):
 def build_cholesky_L(
     raw_params,
     log_diag_clamp_min: float = -8.0,
-    log_diag_clamp_max: float = 1.0,
+    log_diag_clamp_max: float = 6.0,
     max_corr_ratio: float = 0.9,
     diag_floor: float = 1e-4,
 ):
@@ -349,52 +349,166 @@ def sigma_theta_nll_loss(
     loss = 0.5 * (log_det_sigma + mahalanobis)
     return loss.sum()
  
- 
+def theta_covariance_kl_loss(pred_means, pred_L_raw, gt_means, gt_cov,
+                             detach_mean: bool = True, eps: float = 1e-6):
+    """
+    KL(N(gt_means, gt_cov) || N(pred_means, Sigma_pred)) -- full multivariate
+    KL divergence between the REAL annotator-disagreement distribution
+    (gt_cov, read from theta.covariance in the soft label JSON) and the
+    network's predicted distribution.
+
+    IMPORTANT: gt_cov MUST already be in the SAME space as pred_means /
+    Sigma_pred (delta space, matching pos_reg_targets) -- NOT the raw
+    normalised theta.covariance directly. Use
+    theta_box_coder.propagate_theta_covariance() to transform it first,
+    inside the RoI head, before calling this function. Passing raw
+    normalised gt_cov here directly compares two different scales/spaces --
+    the exact class of bug already caught once in this project (the
+    S-transform omission originally found in theta_box_coder.py).
+
+    Unlike sigma_theta_nll_loss (which only ever evaluates the likelihood
+    of ONE point under the predicted distribution, and never reads gt_cov
+    at all), this loss gives the network a DIRECT, explicit target shape --
+    the real, verified annotator covariance structure, including genuine
+    correlation terms -- on every training step.
+
+    Verified before use (see conversation): searched across a range of
+    predicted Sigma scales at a realistic LARGE error (matching the scale
+    of miscalibration implied by real training NEES values around 3000).
+    The loss's minimum sits at a sensibly larger scale than gt_cov itself,
+    not at gt_cov's own (often tiny) native scale -- confirmed on two
+    independent random scenarios. This works because the Mahalanobis-like
+    term here uses the PREDICTED covariance's inverse (same mechanism as
+    the NLL loss), so it still penalises overconfidence even while pulling
+    toward gt_cov's shape.
+
+    Args:
+        pred_means: [N, 4] predicted (x, y, w, h) delta-space values.
+        pred_L_raw: [N, 10] raw Cholesky-factor network output.
+        gt_means:   [N, 4] ground truth point (same value used elsewhere,
+                     e.g. pos_reg_targets).
+        gt_cov:     [N, 4, 4] real annotator covariance, ALREADY
+                     transformed to delta space (see module docstring).
+        detach_mean: if True (default), matches sigma_theta_nll_loss's
+                     convention -- gradient from this loss does not flow
+                     into pred_means.
+        eps:        numerical floor for gt_cov regularisation.
+
+    Returns:
+        Scalar loss, summed over the batch (matches sigma_theta_nll_loss's
+        reduction convention -- see theta_spatial_loss for normalisation).
+    """
+    assert gt_cov.shape[-2:] == (4, 4), f"gt_cov must be [...,4,4], got {gt_cov.shape}"
+    assert gt_cov.device == pred_L_raw.device, "gt_cov/pred_L_raw device mismatch"
+    assert gt_cov.shape[0] == pred_L_raw.shape[0], "gt_cov/pred_L_raw batch size mismatch"
+
+    means_for_residual = pred_means.detach() if detach_mean else pred_means
+    L_pred = build_cholesky_L(pred_L_raw)
+
+    # Symmetrize BEFORE regularising -- defends against floating-point-level
+    # asymmetry from serialisation. Verified sufficient for real, valid PSD
+    # covariance data; does NOT defend against a genuinely invalid/non-PSD
+    # input, which should never occur given how gt_cov is constructed
+    # upstream (weighted outer products + regularisation floor, verified
+    # extensively earlier in this project) -- intentionally not
+    # over-engineered against a case that has already been ruled out.
+    gt_cov = 0.5 * (gt_cov + gt_cov.transpose(-1, -2))
+    gt_cov = gt_cov + eps * torch.eye(4, device=gt_cov.device, dtype=gt_cov.dtype)
+
+    N = pred_L_raw.shape[0]
+    eye_batch = torch.eye(4, device=pred_L_raw.device, dtype=pred_L_raw.dtype).expand(N, 4, 4)
+    # cholesky_solve avoids forming a general inverse explicitly -- same
+    # numerical-stability discipline as sigma_theta_nll_loss's triangular solve.
+    Sigma_pred_inv = torch.cholesky_solve(eye_batch, L_pred)
+
+    trace_term = torch.einsum('nii->n', Sigma_pred_inv @ gt_cov)
+
+    diff = (means_for_residual - gt_means).unsqueeze(-1)
+    mahalanobis = (diff.transpose(-1, -2) @ Sigma_pred_inv @ diff).squeeze(-1).squeeze(-1)
+
+    log_det_pred = 2.0 * torch.log(
+        torch.diagonal(L_pred, dim1=-2, dim2=-1).clamp(min=eps)
+    ).sum(dim=1)
+    log_det_gt = torch.logdet(gt_cov)
+
+    kl_per_sample = 0.5 * (trace_term + mahalanobis - 4.0 + log_det_pred - log_det_gt)
+    return kl_per_sample.sum()   # sum, not mean -- consistent with sigma_theta_nll_loss
+
+
 def theta_spatial_loss(
     pred_means,
     pred_L_raw,
     gt_means,
     gt_theta,
+    gt_cov=None,
     lambda_mean: float = 0.3,
-    lambda_cov: float = 1.0,
+    lambda_cov: float = 0.02,
+    lambda_kl: float = 0.0,
     detach_mean_in_cov: bool = True,
     num_normalizer: float = None,
 ):
     """
-    Combined theta-space spatial loss -- the direct analogue of computing
-    loss_box_mean and loss_box_var together in the existing 1D RoI head.
-    Returns both components separately (not pre-summed) so they can be
-    logged and monitored independently, matching how train/loss_box_mean
-    and train/loss_box_var are logged separately today.
- 
+    Combined theta-space spatial loss. Two required terms (mean, cov) plus
+    one optional third term (KL toward real annotator covariance).
+
+    lambda_cov default changed from 1.0 -> 0.02, matching the value found
+    necessary during real training (LAMBDA_THETA_COV=1.0 caused
+    loss_theta_cov to dominate 90%+ of total loss and destabilise
+    training; 0.02 resolved this). Only matters if a call site relies on
+    this default rather than passing lambda_cov explicitly from config.
+
+    gt_cov / lambda_kl: both default to "off" (None / 0.0) -- fully
+    backward compatible. If provided, gt_cov MUST already be delta-space
+    (see theta_covariance_kl_loss's docstring) -- transform it via
+    theta_box_coder.propagate_theta_covariance() in the RoI head before
+    calling this function; never pass raw normalised theta.covariance here.
+
+    Returns BOTH weighted (for backprop, original key names) AND raw/
+    unweighted values (new "_raw" keys, detached) for every active term --
+    lets you watch each term's true underlying magnitude independent of
+    whatever lambda is currently set, without needing to change a
+    hyperparameter just to see the real number.
+
     Args:
-        pred_means:  [N, 4] predicted (x, y, w, h)
-        pred_L_raw:  [N, 10] raw Cholesky-factor network output
-        gt_means:    [N, 4] ground truth mean (kept as a separate arg for
-                     API symmetry with the existing loss_box_mean call site)
-        gt_theta:    [N, 4] ground truth theta mean (used inside the NLL)
-        lambda_mean: weight on the mean loss
-        lambda_cov:  weight on the covariance NLL loss
-        detach_mean_in_cov: see sigma_theta_nll_loss
-        num_normalizer: if provided, both losses are divided by this
-                     (typically all_labels.numel(), matching how
-                     loss_box_mean is normalised in the 1D code); if
-                     None, losses are returned as raw sums.
- 
+        pred_means, pred_L_raw, gt_means, gt_theta: as before.
+        gt_cov: [N, 4, 4] real annotator covariance, delta-space (see
+                above). If None, the KL term is skipped entirely
+                regardless of lambda_kl.
+        lambda_mean, lambda_cov, lambda_kl: independent weights, each
+                logged and tunable separately.
+        detach_mean_in_cov: applied identically to both the NLL and KL
+                covariance terms, for consistency.
+        num_normalizer: applied to all active terms (weighted and raw).
+
     Returns:
-        {"loss_theta_mean": scalar, "loss_theta_cov": scalar}
+        dict with "loss_theta_mean", "loss_theta_cov" (weighted, always
+        present), "loss_theta_mean_raw", "loss_theta_cov_raw" (unweighted,
+        always present), and -- if gt_cov is provided and lambda_kl > 0 --
+        "loss_theta_kl" and "loss_theta_kl_raw".
     """
-    loss_mean = theta_mean_loss(pred_means, gt_means, reduction="sum")
-    loss_cov = sigma_theta_nll_loss(
+    loss_mean_raw = theta_mean_loss(pred_means, gt_means, reduction="sum")
+    loss_cov_raw = sigma_theta_nll_loss(
         pred_means, pred_L_raw, gt_theta, detach_mean=detach_mean_in_cov
     )
- 
+
     if num_normalizer is not None:
-        loss_mean = loss_mean / num_normalizer
-        loss_cov = loss_cov / num_normalizer
- 
-    return {
-        "loss_theta_mean": loss_mean * lambda_mean,
-        "loss_theta_cov": loss_cov * lambda_cov,
+        loss_mean_raw = loss_mean_raw / num_normalizer
+        loss_cov_raw = loss_cov_raw / num_normalizer
+
+    result = {
+        "loss_theta_mean": loss_mean_raw * lambda_mean,
+        "loss_theta_cov": loss_cov_raw * lambda_cov,
+        "loss_theta_mean_raw": loss_mean_raw.detach(),
+        "loss_theta_cov_raw": loss_cov_raw.detach(),
     }
- 
+
+    if gt_cov is not None and lambda_kl > 0:
+        loss_kl_raw = theta_covariance_kl_loss(
+            pred_means, pred_L_raw, gt_theta, gt_cov, detach_mean=detach_mean_in_cov
+        )
+        if num_normalizer is not None:
+            loss_kl_raw = loss_kl_raw / num_normalizer
+        result["loss_theta_kl"] = loss_kl_raw * lambda_kl
+        result["loss_theta_kl_raw"] = loss_kl_raw.detach()
+
+    return result
