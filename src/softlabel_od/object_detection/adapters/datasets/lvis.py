@@ -42,6 +42,8 @@ class LVIS_SoftLabel_Dataset(CanonicalDetectionDataset):
         coco_images_json: Optional[str] = None,
         categories_json: Optional[str] = None,
         placeholder_tolerance=0.01,
+        exclude_singleton_val: bool = False,
+        exclude_singleton_all: bool = False,
     ):
         self.image_subdir = image_subdir
         self.image_extension = image_extension
@@ -60,6 +62,8 @@ class LVIS_SoftLabel_Dataset(CanonicalDetectionDataset):
             ignore_nofinding_clusters=ignore_nofinding_clusters,
             rater_weights_csv=rater_weights_csv,
             placeholder_tolerance=placeholder_tolerance,
+            exclude_singleton_val=exclude_singleton_val,
+            exclude_singleton_all=exclude_singleton_all,
         )
 
     @staticmethod

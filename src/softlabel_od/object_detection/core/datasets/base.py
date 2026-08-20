@@ -98,6 +98,8 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         ignore_nofinding_clusters: bool = False,
         rater_weights_csv: str | None = None,
         placeholder_tolerance: float = 0.01,
+        exclude_singleton_val: bool = False,
+        exclude_singleton_all: bool = False,
     ):
         self.root = root
         self.transforms = transforms
@@ -105,6 +107,10 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         self.test_split_ratio = test_split_ratio
         self.ignore_nofinding_clusters = ignore_nofinding_clusters
         self.placeholder_tolerance = placeholder_tolerance
+        self.exclude_singleton_val = exclude_singleton_val
+        # When True, images whose only present classes appear in exactly one
+        # image are dropped from the pool entirely (train + val).
+        self.exclude_singleton_all = exclude_singleton_all
 
         self._label_mode = normalize_label_mode(
             label_mode=label_mode,
@@ -456,6 +462,29 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                 for class_idx in present:
                     y[row_idx, class_idx] = 1
 
+        if self.exclude_singleton_all:
+            # Drop images from the pool entirely when every one of their
+            # present classes appears in only one image (column 0 = background,
+            # never treated as a singleton).
+            col_counts = y.sum(axis=0)
+            singletons = {int(c) for c in np.where(col_counts == 1)[0] if c != 0}
+            if singletons:
+                keep_mask = []
+                for row_idx in range(n_images):
+                    present = set(int(c) for c in np.where(y[row_idx] == 1)[0] if c != 0)
+                    # Keep image if it has at least one non-singleton foreground class,
+                    # OR if it is a pure background image (present is empty).
+                    keep_mask.append(not present or not present.issubset(singletons))
+                keep_indices = [i for i, keep in enumerate(keep_mask) if keep]
+                dropped = n_images - len(keep_indices)
+                all_image_ids = [all_image_ids[i] for i in keep_indices]
+                y = y[keep_indices]
+                n_images = len(all_image_ids)
+                print(
+                    f"[split] exclude_singleton_all: dropped {dropped} image(s) "
+                    f"({len(singletons)} singleton classes removed from pool)"
+                )
+
         splitter = MultilabelStratifiedShuffleSplit(
             n_splits=1,
             test_size=self.test_split_ratio,
@@ -465,6 +494,22 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         train_idx, val_idx = next(splitter.split(x_dummy, y))
         train_ids = [all_image_ids[index] for index in train_idx]
         val_ids = [all_image_ids[index] for index in val_idx]
+
+        if self.exclude_singleton_val and not self.exclude_singleton_all:
+            col_counts = y.sum(axis=0)
+            singletons = {int(c) for c in np.where(col_counts == 1)[0] if c != 0}
+            if singletons:
+                keep_val, moved = [], []
+                for index in val_idx:
+                    present = set(int(c) for c in np.where(y[index] == 1)[0])
+                    (moved if present & singletons else keep_val).append(all_image_ids[index])
+                if moved:
+                    train_ids = train_ids + moved
+                    val_ids = keep_val
+                    print(
+                        f"[split] exclude_singleton_val: moved {len(moved)} val image(s) "
+                        f"holding 1-image classes to train ({len(singletons)} singleton classes)"
+                    )
         return train_ids, val_ids
 
     def build_image_id_tensor(self, image_id: str) -> torch.Tensor:
@@ -496,9 +541,15 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
     def _process_hard_item(self, image, findings, image_id: str):
         orig_w, orig_h = self.get_record_image_size(findings, image)
+        num_classes = self.get_num_classes()
+        # Hard labels carry no box uncertainty, but the probabilistic / open-vocab
+        # (lvis_1d) head still requires a gt_stds target — use a small fixed
+        # normalised std so the box-variance loss stays well-defined.
+        HARD_STD = 0.02
         boxes = []
         labels_tensor = []
         confidences = []
+        class_probs = []
 
         for finding in findings:
             dominant_class = self.get_dominant_class(labels_data=[finding])
@@ -524,20 +575,35 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             boxes.append([x, y, x2, y2])
             labels_tensor.append(dominant_class)
             confidences.append(float(finding.get("confidence", 1.0)))
+            # One-hot class distribution so the open-vocab head (which trains on
+            # soft gt_class_probs) can consume hard labels directly.
+            prob = torch.zeros(num_classes, dtype=torch.float32)
+            prob[dominant_class] = 1.0
+            class_probs.append(prob)
 
         if not boxes:
             boxes = torch.zeros((0, 4), dtype=torch.float32)
             labels_tensor = torch.zeros((0,), dtype=torch.int64)
             confidences = torch.zeros((0,), dtype=torch.float32)
+            class_probs = torch.zeros((0, num_classes), dtype=torch.float32)
+            gt_stds = torch.zeros((0, 4), dtype=torch.float32)
+            annotation_weight = torch.zeros((0,), dtype=torch.float32)
         else:
             boxes = torch.as_tensor(boxes, dtype=torch.float32)
             labels_tensor = torch.as_tensor(labels_tensor, dtype=torch.int64)
             confidences = torch.as_tensor(confidences, dtype=torch.float32)
+            class_probs = torch.stack(class_probs)
+            gt_stds = torch.full((boxes.shape[0], 4), HARD_STD, dtype=torch.float32)
+            annotation_weight = confidences.clone()
 
         target = {
             "boxes": boxes,
             "labels": labels_tensor,
             "confidences": confidences,
+            # Soft-format fields required by the lvis_1d / open-vocab head:
+            "gt_class_probs": class_probs,       # [N, num_classes] one-hot
+            "gt_stds": gt_stds,                  # [N, 4] fixed placeholder std
+            "annotation_weight": annotation_weight,  # [N] from confidence
             "image_id": self.build_image_id_tensor(image_id),
         }
         if self.transforms:

@@ -14,7 +14,7 @@ Subclasses implement training_step / validation_step / on_validation_epoch_end.
 
 import torch
 import pytorch_lightning as pl
-from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
+from torch.optim.lr_scheduler import LambdaLR, MultiStepLR, CosineAnnealingLR
 from softlabel_od.object_detection.core.model.factory import get_model
 from softlabel_od.object_detection.utils.training_helpers import (
     load_pretrained_weights,
@@ -35,6 +35,7 @@ class BaseDetectionLightningModule(pl.LightningModule):
         self.cfg = cfg
         self.model_type = model_type
         self._model_configured = False
+        self._warmup_iters = None
         self.model = get_model(
             num_classes=cfg.MODEL.NUM_CLASSES,
             model_type=model_type,
@@ -43,7 +44,11 @@ class BaseDetectionLightningModule(pl.LightningModule):
             probabilistic=cfg.MODEL.PROBABILISTIC,
             anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
             anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
-            architecture=getattr(cfg.MODEL, 'ARCHITECTURE', None) or None,
+            # Forward ARCHITECTURE so the Lightning path matches evaluate.py /
+            # training_setup.py routing (e.g. 'lvis_1d' -> get_model_lvis_1d). Without
+            # this, LVIS runs silently used the VinDr get_model_1d head at train time
+            # while eval used the LVIS head — a train/eval mismatch.
+            architecture=getattr(cfg.MODEL, "ARCHITECTURE", None) or None,
         )
 
     # ------------------------------------------------------------------
@@ -78,10 +83,29 @@ class BaseDetectionLightningModule(pl.LightningModule):
             self.model.roi_heads.register_buffer("class_weights", class_weights.to(device))
         print("Registered class_weights buffer on roi_heads.")
 
+        # Open-vocab head: install CLIP text embeddings of the class names, in the
+        # dataset's index order (sorted names -> idx = pos + 1). Done here because
+        # the class order is only known once the dataset is built.
+        box_predictor = getattr(self.model.roi_heads, "box_predictor", None)
+        if box_predictor is not None and hasattr(box_predictor, "set_text_embeddings"):
+            from softlabel_od.object_detection.adapters.model_components.clip_backbone import (
+                build_lvis_text_embeddings,
+            )
+            class_names = getattr(train_dataset, "_class_names", None)
+            if class_names is None:
+                raise RuntimeError(
+                    "Open-vocab predictor requires train_dataset._class_names (ordered)."
+                )
+            print(f"Building CLIP text embeddings for {len(class_names)} classes ...")
+            text_emb = build_lvis_text_embeddings(class_names, device=device)
+            box_predictor.set_text_embeddings(text_emb)
+            print(f"Installed text embeddings: {tuple(text_emb.shape)} on box_predictor.")
+
         if self.cfg.MISC.FROZEN_LAYERS:
             freeze_layers(self.model, self.cfg.MISC.FROZEN_LAYERS)
             print(f"Frozen layers: {self.cfg.MISC.FROZEN_LAYERS}")
 
+        self._warmup_iters = 1000 #min(1000, max(int(self.trainer.num_training_batches) - 1, 1))
         self._model_configured = True
 
     def _get_train_dataset(self):
@@ -141,9 +165,16 @@ class BaseDetectionLightningModule(pl.LightningModule):
                 {"params": other_params, "lr": self.cfg.TRAIN.BASE_LR},
             ],
             momentum=0.9,
-            weight_decay=0.005,
+            weight_decay=0.01,
         )
 
+        def warmup_lambda(step: int):
+            warmup_iters = self._warmup_iters if self._warmup_iters is not None else 1
+            if step >= warmup_iters:
+                return 1.0
+            alpha = float(step) / float(max(warmup_iters, 1))
+            return (1.0 / 1000.0) * (1.0 - alpha) + alpha
+        warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
         main_scheduler = MultiStepLR(
             optimizer,
             milestones=list(self.cfg.TRAIN.MILESTONES),
@@ -162,5 +193,8 @@ class BaseDetectionLightningModule(pl.LightningModule):
             raise ValueError(f"Unsupported scheduler: {self.cfg.TRAIN.SCHEDULER}")
         return (
             [optimizer],
-            [{"scheduler": epoch_scheduler, "interval": "epoch", "frequency": 1, "name": "epoch_lr"}],
+            [
+                {"scheduler": warmup_scheduler, "interval": "step", "frequency": 1, "name": "warmup"},
+                {"scheduler": epoch_scheduler, "interval": "epoch", "frequency": 1, "name": "epoch_lr"},
+            ],
         )

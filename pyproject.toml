@@ -22,6 +22,7 @@ dependencies = [
     "krippendorff",
     "tqdm",
     "shapely",
+    "albumentations",
     "torch==2.5.1+cu124",
     "torchvision==0.20.1+cu124",
     "pytorch-lightning>=2.0",
