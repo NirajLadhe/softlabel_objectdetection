@@ -69,7 +69,6 @@ class DetectionLightningDataModule(pl.LightningDataModule):
             rare_augment_prob=cfg.AUGMENTATION.RARE_CLASS_AUGMENT_PROB,
             common_augment_prob=cfg.AUGMENTATION.COMMON_CLASS_AUGMENT_PROB,
             rotation_degrees=cfg.AUGMENTATION.ROTATION_DEGREES,
-            rotation_prob=cfg.AUGMENTATION.ROTATION_PROB,
             brightness_range=cfg.AUGMENTATION.BRIGHTNESS_RANGE,
             contrast_range=cfg.AUGMENTATION.CONTRAST_RANGE,
             noise_std=cfg.AUGMENTATION.NOISE_STD,

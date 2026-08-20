@@ -34,12 +34,6 @@ from softlabel_od.object_detection.adapters.model_components.faster_rcnn_1d impo
     ProbabilisticFastRCNNPredictor,
     ProbabilisticRoIHeads,
 )
-from softlabel_od.object_detection.adapters.model_components.clip_backbone import (
-    CLIP_PIXEL_MEAN,
-    CLIP_PIXEL_STD,
-    OpenVocabProbabilisticPredictor,
-    build_clip_rn50_fpn_backbone,
-)
 from softlabel_od.object_detection.utils.losses import soft_cross_entropy_loss
 from softlabel_od.object_detection.utils.training_helpers import create_anchor_generator
 
@@ -81,91 +75,42 @@ class LVISProbabilisticRoIHeads(ProbabilisticRoIHeads):
         losses: dict = {}
 
         if self.training:
-            # ---- 1) Targets for ALL sampled proposals ----
-            # Mirrors faster_rcnn_1d.py. LVIS change: positives are `labels > 0`
-            # (LVIS has no "No Finding" class — index 1 is the real class
-            # `aerosol_can`), whereas the VinDr base gates pathologies on `> 1`.
+            # ---- 1) Positive proposals ----
             all_labels = torch.cat(labels, dim=0)
             positive_proposals_indices = torch.where(all_labels > 0)[0]
             num_pos = positive_proposals_indices.shape[0]
             num_classes = class_logits.shape[1]
 
-            # Build a full [N_total, C] classification target: every row starts as
-            # hard background [1, 0, ...]; positive rows are overwritten with their
-            # soft GMM class probs. Annotator weights stay 1.0 for negatives.
-            cls_targets = torch.zeros_like(class_logits)
-            sample_weights = torch.ones((class_logits.shape[0],), device=class_logits.device)
-            cls_targets[all_labels == 0, 0] = 1.0
-
-            matched_gt_class_probs_list = []
-            matched_ann_weights_list = []
-            for i in range(len(targets)):
-                matched_pos_mask_i = labels[i] > 0
-                if matched_pos_mask_i.sum() == 0:
-                    continue
-                gt_idx_i = matched_idxs[i][matched_pos_mask_i]
-                matched_gt_class_probs_list.append(targets[i]["gt_class_probs"][gt_idx_i])
-                matched_ann_weights_list.append(targets[i]["annotation_weight"][gt_idx_i])
-
-            if num_pos > 0:
-                matched_gt_class_probs = torch.cat(matched_gt_class_probs_list, dim=0)
-                matched_ann_weights = torch.cat(matched_ann_weights_list, dim=0)
-                cls_targets[positive_proposals_indices] = matched_gt_class_probs
-                sample_weights[positive_proposals_indices] = matched_ann_weights
-
-            # ---- 2) Classification loss over ALL proposals (positives + negatives) ----
-            # Computed first so the background classifier still receives gradient on
-            # positive-free batches (the source of LVIS's huge FP count). The POS/NEG
-            # weighted split mirrors faster_rcnn_1d.py: positives carry annotator
-            # weights, negatives are down-weighted so they don't swamp the signal.
-            LAMBDA_CLS = getattr(self, "lambda_cls", 1.0)
-            POS_CLS_WEIGHT = 2.0
-            NEG_CLS_WEIGHT = 0.5
-            per_sample_ce = soft_cross_entropy_loss(
-                class_logits, cls_targets, class_weights=self.class_weights, reduction="none",
-            )
-            pos_mask = all_labels > 0
-            neg_mask = all_labels == 0
-            if pos_mask.any():
-                pos_loss = (per_sample_ce[pos_mask] * sample_weights[pos_mask]).mean()
-            else:
-                pos_loss = class_logits.sum() * 0.0
-            if neg_mask.any():
-                neg_loss = per_sample_ce[neg_mask].mean()
-            else:
-                neg_loss = class_logits.sum() * 0.0
-            loss_classifier = (POS_CLS_WEIGHT * pos_loss + NEG_CLS_WEIGHT * neg_loss) * LAMBDA_CLS
-
-            # No positives -> only the (background) classifier loss has signal.
             if num_pos == 0:
+                device = class_logits.device
                 losses = {
-                    "loss_probabilistic_classifier": loss_classifier,
-                    "loss_box_var": class_logits.sum() * 0.0,
-                    "loss_box_mean": class_logits.sum() * 0.0,
+                    "loss_probabilistic_classifier": torch.tensor(0.0, device=device, requires_grad=True),
+                    "loss_box_var": torch.tensor(0.0, device=device, requires_grad=True),
+                    "loss_box_mean": torch.tensor(0.0, device=device, requires_grad=True),
                 }
                 return result, losses
 
-            # ---- 3) Predicted means/log-vars (delta space) ----
             pos_labels = all_labels[positive_proposals_indices]
             pos_gmm_params = gmm_params[positive_proposals_indices]
 
             reg_targets = torch.cat(regression_targets, dim=0)
             pos_reg_targets = reg_targets[positive_proposals_indices]
 
+            # ---- 2) Predicted means/log-vars (delta space) ----
             pos_gmm_params = pos_gmm_params.reshape(num_pos, num_classes, 8)
             pred_means_delta = pos_gmm_params[torch.arange(num_pos, device=pos_gmm_params.device), pos_labels, :4]
-            raw_log_vars = pos_gmm_params[torch.arange(num_pos, device=pos_gmm_params.device), pos_labels, 4:]
+            raw_log_vars = pos_gmm_params[torch.arange(num_pos), pos_labels, 4:]
             pred_log_vars_delta = torch.clamp(raw_log_vars, min=-10.0, max=10.0)
 
-            # ---- 4) GT stds (pixels -> delta space) ----
+            # ---- 3) GT stds (pixels -> delta space) ----
             gt_stds_delta_list = []
             for i in range(len(targets)):
-                pos_mask_i = labels[i] > 0
-                if pos_mask_i.sum() == 0:
+                pos_mask = labels[i] > 0
+                if pos_mask.sum() == 0:
                     continue
 
-                props_i = proposals[i][pos_mask_i]
-                gt_idx_i = matched_idxs[i][pos_mask_i]
+                props_i = proposals[i][pos_mask]
+                gt_idx_i = matched_idxs[i][pos_mask]
                 gt_boxes_i = targets[i]["boxes"][gt_idx_i]
 
                 gt_stds_norm_i = targets[i]["gt_stds"][gt_idx_i]
@@ -193,13 +138,13 @@ class LVISProbabilisticRoIHeads(ProbabilisticRoIHeads):
             REG_WEIGHTS = gt_stds_delta.new_tensor([10.0, 10.0, 5.0, 5.0])
             gt_stds_delta_scaled = gt_stds_delta * REG_WEIGHTS
 
-            # ---- 5) Smooth-L1 loss on means ----
+            # ---- 4) Smooth-L1 loss on means ----
             LAMBDA_MEAN = getattr(self, "lambda_mean", 2.0)
             loss_box_mean = torch.nn.functional.smooth_l1_loss(
                 pred_means_delta, pos_reg_targets, beta=1.0, reduction="sum",
             ) / all_labels.numel() * LAMBDA_MEAN
 
-            # ---- 6) Smooth-L1 loss on log-stds ----
+            # ---- 5) Smooth-L1 loss on log-stds ----
             gt_stds_delta_safe = gt_stds_delta_scaled.clamp(min=1e-3, max=50.0)
             pred_log_stds = 0.5 * pred_log_vars_delta
             gt_log_stds = torch.log(gt_stds_delta_safe)
@@ -207,6 +152,40 @@ class LVISProbabilisticRoIHeads(ProbabilisticRoIHeads):
             loss_box_var = torch.nn.functional.smooth_l1_loss(
                 pred_log_stds, gt_log_stds, beta=0.5, reduction="mean",
             ) * LAMBDA_VAR
+
+            # ---- 6) Classification loss over ALL proposals (positives + negatives) ----
+            # fix: extend cls loss to all proposals (positives+negatives) to suppress FPs.
+            # Computing CE only on positives gave the background classifier zero gradient,
+            # so empty regions were freely labelled as objects (the source of LVIS's huge
+            # FP count). Build a full [N_total, C] target: every row starts as hard
+            # background [1, 0, ...]; positive rows are overwritten with their soft GMM
+            # targets. Annotator weights stay 1.0 for negatives.
+            num_total = all_labels.shape[0]
+            cls_targets = class_logits.new_zeros((num_total, num_classes))
+            cls_targets[:, 0] = 1.0
+            ann_weights = class_logits.new_ones(num_total)
+
+            if num_pos > 0:
+                pos_gt_class_probs_list = []
+                pos_ann_weights_list = []
+                for i in range(len(targets)):
+                    pos_mask = labels[i] > 0
+                    if pos_mask.sum() == 0:
+                        continue
+                    gt_idx_i = matched_idxs[i][pos_mask]
+                    pos_gt_class_probs_list.append(targets[i]["gt_class_probs"][gt_idx_i])
+                    pos_ann_weights_list.append(targets[i]["annotation_weight"][gt_idx_i])
+
+                pos_gt_class_probs = torch.cat(pos_gt_class_probs_list, dim=0)
+                pos_ann_weights = torch.cat(pos_ann_weights_list, dim=0)
+                cls_targets[positive_proposals_indices] = pos_gt_class_probs
+                ann_weights[positive_proposals_indices] = pos_ann_weights
+
+            LAMBDA_CLS = getattr(self, "lambda_cls", 1.0)
+            per_sample_ce = soft_cross_entropy_loss(
+                class_logits, cls_targets, class_weights=self.class_weights, reduction="none",
+            )
+            loss_classifier = (per_sample_ce * ann_weights).mean() * LAMBDA_CLS
 
             losses = {
                 "loss_probabilistic_classifier": loss_classifier,
@@ -344,8 +323,8 @@ LVIS_DEFAULT_ANCHOR_ASPECT_RATIOS: List[float] = [
 # gradient dominance from frequent categories.
 # Stronger lambda_mean helps anchor box convergence early in training.
 LVIS_LAMBDA_CLS = 1
-LVIS_LAMBDA_MEAN = 2.0    # reverted to openvocab V1 (was 0.3)
-LVIS_LAMBDA_VAR = 1.0     # reverted to openvocab V1 (was 0.5)
+LVIS_LAMBDA_MEAN = 3.0
+LVIS_LAMBDA_VAR = 0.75
 
 # Log-variance bias: controls initial bbox uncertainty width.
 # Raised -3.5 -> -2.0: v3 eval showed predicted std ~2.6px vs actual error ~13px
@@ -355,9 +334,9 @@ LVIS_LOG_VAR_BIAS = -2.0
 
 # Post-NMS inference: LVIS images are object-dense; LVIS evaluation
 # protocols use low score thresholds.
-LVIS_SCORE_THRESH = 0.01
-LVIS_NMS_THRESH = 0.8
-LVIS_DETECTIONS_PER_IMG = 300    # reverted to openvocab V1 (was 100)
+LVIS_SCORE_THRESH = 0.05
+LVIS_NMS_THRESH = 0.5
+LVIS_DETECTIONS_PER_IMG = 300
 
 # Weight decay stored on the model for optimizers that read model.lvis_weight_decay.
 LVIS_WEIGHT_DECAY = 0.0001
@@ -405,15 +384,7 @@ def get_model_lvis_1d(
     Returns:
         torch.nn.Module ready for training.
     """
-    # CLIP RN50 backbone => open-vocabulary cosine-sim text classifier. The CLIP
-    # visual trunk expects CLIP pixel normalization (not ImageNet), so we override
-    # the FasterRCNN transform's image_mean/image_std below.
-    is_clip = backbone_name in ("clip_rn50", "clip-rn50", "cliprn50")
-    open_vocab = is_clip
-
-    if is_clip:
-        backbone = build_clip_rn50_fpn_backbone(out_channels=256)
-    elif backbone_name in ("resnet50", "resnet101"):
+    if backbone_name in ("resnet50", "resnet101"):
         weights = (
             "ResNet50_Weights.IMAGENET1K_V1"
             if backbone_name == "resnet50"
@@ -439,19 +410,10 @@ def get_model_lvis_1d(
     aspect_ratios_per_level = _expand_aspect_ratios(ratios, len(sizes))
     anchor_generator = create_anchor_generator(sizes, aspect_ratios_per_level)
 
-    # CLIP weights require CLIP pixel normalization; ImageNet backbones keep the
-    # torchvision defaults (image_mean/std left unset).
-    norm_kwargs = (
-        {"image_mean": list(CLIP_PIXEL_MEAN), "image_std": list(CLIP_PIXEL_STD)}
-        if is_clip
-        else {}
-    )
-
     model = FasterRCNN(
         backbone,
         num_classes=num_classes,
         rpn_anchor_generator=anchor_generator,
-        **norm_kwargs,
         # fg_iou 0.5->0.4: treat more proposals as positive so the RPN learns to
         # propose more candidates. v3 recall ceiling was 27% even at 300 outputs,
         # so the proposal stage (not the post-NMS cap) is the recall limiter.
@@ -472,26 +434,18 @@ def get_model_lvis_1d(
     in_features = model.roi_heads.box_predictor.cls_score.in_features
 
     if probabilistic:
-        if open_vocab:
-            print("Using LVIS Open-Vocab Probabilistic RoI Head (CLIP text classifier + 1D GMM).")
-            model.roi_heads.box_predictor = OpenVocabProbabilisticPredictor(
-                in_features,
-                num_classes,
-                log_var_bias=log_var_bias,
-            )
-        else:
-            print("Using LVIS Probabilistic RoI Head (1D GMM).")
-            model.roi_heads.box_predictor = ProbabilisticFastRCNNPredictor(
-                in_features,
-                num_classes,
-                log_var_bias=log_var_bias,
-            )
+        print("Using LVIS Probabilistic RoI Head (1D GMM).")
+        model.roi_heads.box_predictor = ProbabilisticFastRCNNPredictor(
+            in_features,
+            num_classes,
+            log_var_bias=log_var_bias,
+        )
         model.roi_heads = LVISProbabilisticRoIHeads(
             box_roi_pool=model.roi_heads.box_roi_pool,
             box_head=model.roi_heads.box_head,
             box_predictor=model.roi_heads.box_predictor,
             fg_iou_thresh=0.5,
-            bg_iou_thresh=0.3,
+            bg_iou_thresh=0.5,
             batch_size_per_image=512,
             positive_fraction=0.5,
             bbox_reg_weights=[10, 10, 5, 5],
