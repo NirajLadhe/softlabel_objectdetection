@@ -2,7 +2,7 @@ DATASET:
   name: "vindrcxr"
   no_finding_labels: ["No finding", "No findings"]
   no_finding_id: 14
-  image_file_extension: ".dicom"
+  image_file_extension: ".png"
   annotator_id_col: "rad_id"
   image_id_col: "image_id"
   class_name_col: "class_name"
@@ -11,7 +11,7 @@ DATASET:
 
 PIPELINE:
   gmm_mode: "1d"
-  clustering_method: "iou"
+  clustering_method: "iomin_center_gate" # "iou" or "iomin" or "iomin_center_gate"
   iou_threshold: 0.5
   iomin_threshold: 0.5
   center_ratio_threshold: 0.5

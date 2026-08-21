@@ -11,6 +11,7 @@ import json
 import os
 import sys
 from collections import Counter
+import argparse
 
 def is_placeholder_bbox(bbox):
     """Check if bbox is the [0,0,1,1] placeholder for 'No Finding'."""
@@ -92,23 +93,24 @@ def extract_majority_hard_labels(soft_labels, min_confidence=0.3):
         
         # Case 3: Majority voted for NoFindingInCluster (disputed case)
         if majority_class == 'NoFindingInCluster':
-            hard_label = {
-                'image_id': image_id,
-                'image_width': image_width,
-                'image_height': image_height,
-                'finding_id': finding_id,
-                'original_annotations': original_annotations,
-                'bbox': [0.0, 0.0, 1.0, 1.0],  # Placeholder bbox for No Finding
-                'class': 'No Finding',
-                'confidence': majority_confidence,
-                'extraction_method': 'majority_no_finding_disputed',
-                'original_class_probs': class_probs,
-                'renormalized_class_probs': {'No finding': class_probs['NoFindingInCluster']},
-                'num_annotations': num_annotations
-            }
+            # hard_label = {
+            #     'image_id': image_id,
+            #     'image_width': image_width,
+            #     'image_height': image_height,
+            #     'finding_id': finding_id,
+            #     'original_annotations': original_annotations,
+            #     'bbox': [0.0, 0.0, 1.0, 1.0],  # Placeholder bbox for No Finding
+            #     'class': 'No Finding',
+            #     'confidence': majority_confidence,
+            #     'extraction_method': 'majority_no_finding_disputed',
+            #     'original_class_probs': class_probs,
+            #     'renormalized_class_probs': {'No finding': class_probs['NoFindingInCluster']},
+            #     'num_annotations': num_annotations
+            # }
             
-            hard_labels.append(hard_label)
+            # hard_labels.append(hard_label)
             stats['majority_no_finding_disputed'] += 1
+            continue
         
         # Case 4: Majority voted for a pathology class
         else:
@@ -138,12 +140,17 @@ def extract_majority_hard_labels(soft_labels, min_confidence=0.3):
     return hard_labels, stats
 
 def main():
+    parser = argparse.ArgumentParser(description="Extract hard labels from 1D Gaussian Uncertainty soft labels - MAJORITY VOTE approach.")
+    parser.add_argument("--input-file", type=str, required=True, help="Input file path for 1D Gaussian soft labels.")
+    parser.add_argument("--min-confidence", type=float, default=0.3, help="Minimum confidence threshold for hard labels.")
+    parser.add_argument("--clustering-method", type=str, required=True, choices=['iou', 'iomin', 'iomin_center_gate'], help="Clustering method used to generate soft labels.")
+    args = parser.parse_args()
     # File paths
-    project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))   
-    input_file = os.path.join(project_root_ext, 'outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json')
+    project_root_ext = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', '..'))   
+    input_file = args.input_file
     output_dir = os.path.join(project_root_ext, 'outputs/vindrcxr/hard_labels')
-    output_file = os.path.join(output_dir, 'HardLabels_MajorityVote_iou0_5.json')
-    
+    output_file = os.path.join(output_dir, f'HardLabels_MajorityVote_{args.clustering_method}.json')
+
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     

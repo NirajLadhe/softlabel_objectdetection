@@ -27,88 +27,140 @@ METRIC_RUNNERS = {
     "lrp": evaluate_lrp,
 }
 
+NO_FINDING_CLASS_ID = 1
+
+PRED_ALIGNED_FIELDS = (
+    "boxes",
+    "labels",
+    "scores",
+    "bbox_stds",
+    "bbox_means",
+    "class_probs",
+    "class_scores",
+)
+
+GT_ALIGNED_FIELDS = (
+    "boxes",
+    "labels",
+    "gt_class_probs",
+    "gt_stds",
+)
+
+
+def _filter_entry_rows(entry, keep_mask, aligned_fields):
+    """Filter row-aligned arrays in a prediction/GT dict while preserving metadata."""
+    filtered = dict(entry)
+    keep_mask = np.asarray(keep_mask, dtype=bool)
+
+    for key in aligned_fields:
+        if key not in filtered:
+            continue
+
+        value = filtered[key]
+        if value is None:
+            continue
+
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            continue
+
+        if arr.shape[0] == keep_mask.shape[0]:
+            filtered[key] = arr[keep_mask]
+
+    return filtered
+
+
+def apply_no_finding_eval_policy(
+    predictions,
+    ground_truths,
+    *,
+    policy: str,
+    no_finding_class_id: int = NO_FINDING_CLASS_ID,
+):
+    """
+    Eval-only No-Finding handling.
+
+    policy="keep": leave predictions/GT unchanged.
+    policy="drop": remove class-1 No-Finding rows from both predictions and GT.
+    """
+    if policy == "keep":
+        return predictions, ground_truths
+
+    if policy != "drop":
+        raise ValueError(f"Unsupported no-finding eval policy: {policy}")
+
+    filtered_predictions = []
+    filtered_ground_truths = []
+
+    for pred, gt in zip(predictions, ground_truths):
+        pred_labels = np.asarray(pred.get("labels", []))
+        gt_labels = np.asarray(gt.get("labels", []))
+
+        pred_keep = pred_labels != no_finding_class_id
+        gt_keep = gt_labels != no_finding_class_id
+
+        filtered_predictions.append(
+            _filter_entry_rows(pred, pred_keep, PRED_ALIGNED_FIELDS)
+        )
+        filtered_ground_truths.append(
+            _filter_entry_rows(gt, gt_keep, GT_ALIGNED_FIELDS)
+        )
+
+    return filtered_predictions, filtered_ground_truths
+
+def resolve_metric_types(metric_types: list[str]) -> list[str]:
+    """Expand 'all', validate names, and deduplicate while preserving order."""
+    if not metric_types:
+        return ["default"]
+
+    if "all" in metric_types:
+        if len(metric_types) > 1:
+            raise ValueError(
+                "'all' cannot be combined with other metric types. "
+                f"Got: {metric_types}"
+            )
+        return list(METRIC_RUNNERS.keys())
+
+    resolved = []
+    for name in metric_types:
+        if name not in METRIC_RUNNERS:
+            raise ValueError(
+                f"Metric '{name}' is not implemented. "
+                f"Available metrics: {sorted(METRIC_RUNNERS)}"
+            )
+        if name not in resolved:
+            resolved.append(name)
+    return resolved
 
 def evaluate(args):
+    cfg = get_cfg_from_file(args.config)
+    
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
     print(f"Device: {device}")
 
-    cfg = get_cfg_from_file(args.config)
     is_hard = args.gmm_type == "HARD_LABEL"
     probabilistic = not is_hard
     label_mode = "hard" if is_hard else f"soft_{args.gmm_type.lower()}"
 
-    print(f"\nCreating {label_mode} validation dataset...")
+    print(f"\nCreating {label_mode} test dataset...")
     dataset_cls = get_dataset_class(args.dataset)
-    val_dataset = dataset_cls(
+    test_dataset = dataset_cls(
         root=args.data_root,
         label_file=args.label_file,
         transforms=Compose([ToTensor()]),
-        train=False,
+        split="test",
         test_split_ratio=args.test_split_ratio,
+        val_split_ratio=args.val_split_ratio,
         label_mode=label_mode,
     )
-
-    # Apply no-finding filtering/sampling for evaluation
-    all_indices = list(range(len(val_dataset)))
-    valid_indices = all_indices
-    
-    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
-        print("Filtering pure No-Finding images (healthy CXR) from validation set...")
-        valid_indices = [
-            idx for idx in all_indices
-            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx])
-        ]
-    elif cfg.DATA.NOFINDING_INCLUDE_FRACTION < 1.0:
-        fraction = cfg.DATA.NOFINDING_INCLUDE_FRACTION
-        print(f"Sampling {fraction*100:.1f}% of pure No-Finding images for validation...")
-        
-        pathology_indices = []
-        nofinding_indices = []
-        for idx in all_indices:
-            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx]):
-                pathology_indices.append(idx)
-            else:
-                nofinding_indices.append(idx)
-        
-        if nofinding_indices:
-            np.random.seed(42)
-            n_nofinding_to_keep = int(len(nofinding_indices) * fraction)
-            sampled_nofinding = np.random.choice(
-                nofinding_indices, 
-                size=n_nofinding_to_keep, 
-                replace=False
-            ).tolist()
-            valid_indices = pathology_indices + sampled_nofinding
-            valid_indices.sort()
-        else:
-            valid_indices = pathology_indices
-        
-        print(f"  Validation: {len(pathology_indices)} pathology + {len(sampled_nofinding if nofinding_indices else [])} no-finding = {len(valid_indices)} total")
-    
-    if len(valid_indices) < len(all_indices):
-        from torch.utils.data import Subset
-        val_dataset = Subset(val_dataset, valid_indices)
-
-    # Filter out pure no-finding images if configured
-    if cfg.DATA.IGNORE_NOFINDING_IMAGES:
-        print("Filtering pure No-Finding images (healthy CXR) from validation set...")
-        valid_indices = [
-            idx for idx in range(len(val_dataset))
-            if val_dataset.has_pathology_clusters(val_dataset.image_ids[idx])
-        ]
-        kept = len(valid_indices)
-        total = len(val_dataset)
-        print(f"  Kept {kept}/{total} images ({kept/total*100:.1f}% have pathology).")
-        from torch.utils.data import Subset
-        val_dataset = Subset(val_dataset, valid_indices)
-
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
         batch_size=args.batch_size,
         shuffle=False,
         collate_fn=collate_fn,
         num_workers=args.num_workers,
     )
+<<<<<<< HEAD
     print(f"Validation set: {len(val_dataset)} images")
 
     # Handle class_names for both original dataset and Subset wrapper
@@ -138,7 +190,34 @@ def evaluate(args):
         list(METRIC_RUNNERS.keys())
         if args.metric_type == "all"
         else [args.metric_type]
+=======
+    print(f"Test set: {len(test_dataset)} images")
+    class_names = test_dataset.class_names
+    model = load_model(
+        weights_path=args.weights,
+        num_classes=args.num_classes,
+        model_type=args.gmm_type,
+        backbone=args.backbone,
+        probabilistic=probabilistic,
+        device=device,
+        anchor_sizes=cfg.MODEL.ANCHOR_SIZES,
+        anchor_aspect_ratios=cfg.MODEL.ANCHOR_ASPECT_RATIOS,
+>>>>>>> origin/main
     )
+
+    predictions, ground_truths = collect_predictions(model, test_loader, device=device, is_probabilistic=probabilistic)
+    print(f"Collected predictions for {len(predictions)} images")
+    predictions, ground_truths = apply_no_finding_eval_policy(
+        predictions,
+        ground_truths,
+        policy=args.no_finding_eval_policy,
+    )
+    if args.no_finding_eval_policy == "drop":
+        print("No-Finding eval policy: dropped class_id=1 from predictions and ground truth")
+    else:
+        print("No-Finding eval policy: kept class_id=1 in predictions and ground truth")
+
+    selected_metrics = resolve_metric_types(args.metric_type)
 
     results = {}
 
@@ -189,7 +268,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained detection model")
     parser.add_argument("--config", type=str, default=None, help="Model initialization config file (.yaml)")
     parser.add_argument("--eval-tag", type=str, default=None, help="Evaluation tag for the results")
-    parser.add_argument("--metric-type", type=str, default="default", choices=["default", "tide", "pdq", "lrp", "all"], help="Which evaluation metric group to run.")
+    parser.add_argument("--metric-type", type=str, nargs="+", default=["default"], choices=["default", "tide", "pdq", "lrp", "all"], help="Which evaluation metric group to run.")
     parser.add_argument("--weights", type=str, required=True, help="Path to model weights (.pth)")
     parser.add_argument("--gmm-type", type=str, default="1D", choices=["1D", "HARD_LABEL"])
     parser.add_argument("--dataset", type=str, default="vindrcxr", help="Registered dataset adapter name")
@@ -198,36 +277,70 @@ def main():
     parser.add_argument("--data-root", type=str, default="/media/klee_ro/public_datasets/vindr_cxr")
     parser.add_argument("--output", type=str, default=os.path.join(PROJECT_ROOT, "outputs/vindrcxr/evaluation_results"))
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--num-classes", type=int, default=15)
-    parser.add_argument("--backbone", type=str, default="resnet50")
+    parser.add_argument("--num-classes", type=int, default=16)
+    parser.add_argument("--backbone", type=str, default="resnet50", choices=["resnet50", "resnet101", "mobilenet", "swin_v2_b", "swin_v2_t"])
     parser.add_argument("--test-split-ratio", type=float, default=0.20)
+    parser.add_argument("--val-split-ratio", type=float, default=0.20)
     parser.add_argument("--num-workers", type=int, default=None, help="Number of workers for dataloader (0 = single-process)")
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument(
+        "--no-finding-eval-policy",
+        type=str,
+        default="keep",
+        choices=["keep", "drop"],
+        help=(
+            "Eval-only handling for class_id=1 No Finding. "
+            "'keep' leaves predictions/GT unchanged; "
+            "'drop' removes No-Finding rows from both predictions and GT."
+        ),
+    )
     args = parser.parse_args()
 
+    cfg = get_cfg_from_file(args.config)
+    
+    # Handle default values for num_workers
     if args.num_workers is None:
         if args.metric_type in ["pdq"]:
             args.num_workers = 1
         else:
             args.num_workers = 4
+
+    # Handle default values for label file
     if args.label_file is None:
         if args.gmm_type == "1D":
             args.label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/1DGMM_softLabels_iou0_5_with_priors.json")
+        elif args.gmm_type == "HARD_LABEL":
+            args.label_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/hard_labels/HardLabels_MajorityVote_iou0_5.json")
         else:
             raise ValueError(f"No label file provided for gmm type: {args.gmm_type}")
         print(f"Auto-selected label file: {args.label_file}")
+    
+    # Handle default values for config file
     if args.config is None:
-        args.config = os.path.join(PROJECT_ROOT, "configs/vindrcxr_1d_softlabel_config_albers.yaml")
+        if args.gmm_type == "1D":
+            args.config = os.path.join(PROJECT_ROOT, "configs/vindrcxr_1d_softlabel_config_albers.yaml")
+        elif args.gmm_type == "HARD_LABEL":
+            args.config = os.path.join(PROJECT_ROOT, "configs/vindrcxr_hardlabel_config_albers.yaml")
+        else:
+            raise ValueError(f"No config file provided for gmm type: {args.gmm_type}")
+
+    # Handle default values for eval tag
     if args.eval_tag is None:
         args.eval_tag = "1D_Gaussian_softlabels_iou0_5"
     
+
+    # Handle default values for priors file
     if args.priors_file is None:
         if args.gmm_type == "1D":
             args.priors_file = os.path.join(PROJECT_ROOT, "outputs/vindrcxr/1d_gaussian_softlabels/priors/class_priors_1d_iou0_5.json")
-        else:
-            raise ValueError(f"No priors file provided for gmm type: {args.gmm_type}")
-        print(f"Auto-selected priors file: {args.priors_file}")
+        elif args.gmm_type == "HARD_LABEL":
+            pass
     
+    # Handle default values for test and val split ratio
+    if args.test_split_ratio is None:
+        args.test_split_ratio = cfg.DATA.TEST_SPLIT_RATIO
+    if args.val_split_ratio is None:
+        args.val_split_ratio = cfg.DATA.VAL_SPLIT_RATIO
 
     evaluate(args)
 

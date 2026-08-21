@@ -536,7 +536,14 @@ src/softlabel_od/
 ## Citation
 
 ```bibtex
-Publication Embargo - do not publish
+@inproceedings{
+ognawala2026learning,
+title={Learning from Disagreement},
+author={Haaroon Afroz Ognawala and David Tschirschwitz and Claudio Jung and Volker Rodehorst},
+booktitle={Second Workshop on Curated Data for Efficient Learning},
+year={2026},
+url={https://openreview.net/forum?id=UDF9tTy7je}
+}
 ```
 
 ## Acknowledgments

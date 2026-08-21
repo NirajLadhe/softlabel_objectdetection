@@ -12,7 +12,7 @@ import json
 import os
 from abc import abstractmethod
 from collections import Counter
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Literal
 
 import numpy as np
 import torch
@@ -23,15 +23,17 @@ from softlabel_od.object_detection.ports.dataset_port import DetectionDatasetPor
 from softlabel_od.object_detection.utils.training_helpers import load_rater_weights
 from softlabel_od.object_detection.utils.config import get_cfg_defaults
 
+SplitName = Literal["train", "val", "test"]
+
 cfg = get_cfg_defaults()
-BACKGROUND_KEYS = {
-    "__background__",
+NO_FINDING_KEYS = {
     "NoFindingInCluster",
     "No Finding",
     "No finding",
     "NoFinding",
     "no_finding",
 }
+BACKGROUND_KEYS = {"__background__"}
 
 
 def normalize_label_mode(
@@ -78,20 +80,22 @@ def label_mode_to_legacy_fields(label_mode: str) -> tuple[str, str | None]:
         return "soft", "2D"
     raise ValueError(f"Unsupported label mode: {label_mode}")
 
-
 class CanonicalDetectionDataset(DetectionDatasetPort):
     """
     Shared implementation for datasets that consume canonical hard/soft label
     JSON files and return Faster R-CNN compatible targets.
     """
+    _SPLIT_CACHE: dict[tuple, tuple[list[str], list[str], list[str]]] = {}
 
     def __init__(
         self,
         root: str,
         label_file: str,
         transforms=None,
-        train: bool = True,
+        split: SplitName = "train",
+        train: bool | None = None,          # backward compat; prefer `split`
         test_split_ratio: float = 0.2,
+        val_split_ratio: float = 0.2,
         label_mode: str | None = None,
         dataset_type: str | None = None,
         gmm_type: str | None = None,
@@ -100,9 +104,15 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         placeholder_tolerance: float = 0.01,
     ):
         self.root = root
+        self._label_file = os.path.abspath(label_file)
         self.transforms = transforms
-        self.train = train
+        if train is not None:
+            split = "train" if train else "val"
+        if split not in ("train", "val", "test"):
+            raise ValueError(f"split must be 'train', 'val', or 'test', got {split!r}")
+        self.split = split
         self.test_split_ratio = test_split_ratio
+        self.val_split_ratio = val_split_ratio
         self.ignore_nofinding_clusters = ignore_nofinding_clusters
         self.placeholder_tolerance = placeholder_tolerance
 
@@ -125,9 +135,10 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         print(f"Loaded {len(raw_labels)} label entries")
 
         self._image_data = self.group_records_by_image(raw_labels)
-        train_ids, val_ids = self.create_stratified_split()
-        self._image_ids = train_ids if self.train else val_ids
-        split_name = "Training" if self.train else "Validation"
+        train_ids, val_ids, test_ids = self.create_stratified_splits()
+        split_map = {"train": train_ids, "val": val_ids, "test": test_ids}
+        self._image_ids = split_map[self.split]
+        split_name = {"train": "Training", "val": "Validation", "test": "Test"}[self.split]
         print(f"{split_name} set: {len(self._image_ids)} images")
 
     @property
@@ -180,6 +191,19 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
     def is_background_key(self, class_name: str) -> bool:
         return class_name in BACKGROUND_KEYS
+    
+    def is_nofinding_key(self, class_name: str) -> bool:
+        return class_name in NO_FINDING_KEYS
+
+    def resolve_class_name_to_idx(self, class_name: str) -> int | None:
+        """Map a label string to a model class index (0=background, 1=No Finding, 2+=pathology)."""
+        if class_name in self.class_to_idx:
+            return self.class_to_idx[class_name]
+        if self.is_nofinding_key(class_name) and "No Finding" in self.class_to_idx:
+            return self.class_to_idx["No Finding"]
+        if class_name in BACKGROUND_KEYS:
+            return 0
+        return None
 
     def is_placeholder_bbox(self, bbox: List[float] | tuple[float, ...] | None) -> bool:
         if not bbox or len(bbox) != 4:
@@ -223,17 +247,25 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
     def build_class_prob_vector(self, class_probs: Dict[str, float] | None) -> torch.Tensor:
         prob_vector = torch.zeros(self.get_num_classes(), dtype=torch.float32)
+        no_finding_idx = self.class_to_idx.get("No Finding", 1)
+
         for class_name, prob in (class_probs or {}).items():
-            if class_name in self.class_to_idx:
-                prob_vector[self.class_to_idx[class_name]] = float(prob)
-            elif self.is_background_key(class_name):
-                prob_vector[0] = float(prob)
+            prob = float(prob)
+
+            if class_name in BACKGROUND_KEYS:
+                prob_vector[0] += prob
+            elif class_name == "NoFindingInCluster" or self.is_nofinding_key(class_name):
+                prob_vector[no_finding_idx] += prob
+            elif class_name in self.class_to_idx:
+                cls_idx = self.class_to_idx[class_name]
+                prob_vector[cls_idx] += prob
 
         prob_sum = prob_vector.sum()
         if prob_sum > 0:
             prob_vector = prob_vector / prob_sum
         else:
             prob_vector[0] = 1.0
+
         return prob_vector
 
     def get_presence_labels(self, image_id: str, threshold: float = 0.1) -> Set[int]:
@@ -250,12 +282,9 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                         present.add(self.class_to_idx[class_name])
         else:
             for finding in labels:
-                if "renormalized_class_probs" in finding:
-                    for class_name, prob in (finding.get("renormalized_class_probs") or {}).items():
-                        if class_name in self.class_to_idx and prob >= threshold:
-                            present.add(self.class_to_idx[class_name])
-                elif "class" in finding and finding["class"] in self.class_to_idx:
-                    present.add(self.class_to_idx[finding["class"]])
+                dominant = self.get_dominant_class(labels_data=[finding])
+                if dominant >= 1:
+                    present.add(dominant)
         return present
 
     def get_dominant_class(
@@ -272,21 +301,24 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         class_vote_counts: Dict[int, float] = {}
         for label in labels_data:
             if self.dataset_type == "hard":
-                if "renormalized_class_probs" in label:
-                    renorm_probs = label["renormalized_class_probs"]
-                    best_class = None
-                    best_prob = 0.0
-                    for class_name, prob in renorm_probs.items():
-                        if class_name in self.class_to_idx and prob > best_prob:
-                            best_prob = float(prob)
-                            best_class = self.class_to_idx[class_name]
-                    if best_class is not None:
-                        class_vote_counts[best_class] = class_vote_counts.get(best_class, 0.0) + best_prob
-                elif "class" in label:
-                    class_name = label["class"]
-                    if class_name in self.class_to_idx:
-                        class_idx = self.class_to_idx[class_name]
-                        class_vote_counts[class_idx] = class_vote_counts.get(class_idx, 0.0) + 1.0
+                best_class = None
+                best_prob = -1.0
+
+                renorm_probs = label.get("renormalized_class_probs") or {}
+                for class_name, prob in renorm_probs.items():
+                    cls = self.resolve_class_name_to_idx(class_name)
+                    if cls is not None and float(prob) > best_prob:
+                        best_prob = float(prob)
+                        best_class = cls
+
+                if best_class is None and "class" in label:
+                    cls = self.resolve_class_name_to_idx(label["class"])
+                    if cls is not None:
+                        best_class = cls
+                        best_prob = 1.0
+
+                if best_class is not None:
+                    class_vote_counts[best_class] = class_vote_counts.get(best_class, 0.0) + best_prob
             else:
                 best_class = None
                 best_prob = 0.0
@@ -306,15 +338,14 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
         best_class = 0
         best_prob = -1.0
         for class_name, prob in probs.items():
-            if class_name in self.class_to_idx:
-                cls = self.class_to_idx[class_name]
-            elif self.is_background_key(class_name):
-                cls = 0
-            else:
+            cls = self.resolve_class_name_to_idx(class_name)
+            if cls is None:
                 continue
             if prob > best_prob:
                 best_prob = float(prob)
                 best_class = cls
+        if best_class == 0 and self.dataset_type == "hard":
+            return self.get_dominant_class(labels_data=[cluster_label])
         return best_class
     
     def has_pathology_clusters(self, image_id: str) -> bool:
@@ -330,7 +361,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             if self.record_is_placeholder(label):
                 continue
             # Check if this cluster has a pathology (non-background) dominant class
-            if self.get_cluster_dominant_overall(label) != 0:
+            if self.get_cluster_dominant_overall(label) >= 2:
                 return True
         return False
     
@@ -351,6 +382,8 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             if class_name not in self.class_to_idx:
                 continue
             cls = self.class_to_idx[class_name]
+            if cls <= 1: # added check for No Finding (class 1)
+                continue
             if prob > best_prob:
                 best_prob = float(prob)
                 best_class = cls
@@ -389,27 +422,22 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                     total += 1
             else:
                 for finding in labels:
-                    if "renormalized_class_probs" in finding:
-                        best_class = None
-                        best_prob = -1.0
-                        for class_name, prob in (finding.get("renormalized_class_probs") or {}).items():
-                            if class_name in self.class_to_idx and prob > best_prob:
-                                best_prob = float(prob)
-                                best_class = self.class_to_idx[class_name]
-                        if best_class is None:
-                            continue
-                        cls = best_class
-                    elif "class" in finding and finding["class"] in self.class_to_idx:
-                        cls = self.class_to_idx[finding["class"]]
-                    else:
+                    best_class = None
+                    best_prob = -1.0
+                    for class_name, prob in (finding.get("renormalized_class_probs") or {}).items():
+                        cls = self.resolve_class_name_to_idx(class_name)
+                        if cls is not None and float(prob) > best_prob:
+                            best_prob = float(prob)
+                            best_class = cls
+                    if best_class is None and "class" in finding:
+                        best_class = self.resolve_class_name_to_idx(finding["class"])
+                    if best_class is None or best_class <= 1:
                         continue
-                    if cls == 0:
-                        continue
-                    counts[cls] += 1
+                    counts[best_class] += 1
                     total += 1
 
         weights = torch.ones(num_classes, dtype=torch.float32)
-        disease_classes = list(range(1, num_classes))
+        disease_classes = list(range(2, num_classes))
         total = max(1, total)
         num_disease_classes = max(1, len(disease_classes))
 
@@ -431,6 +459,9 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             weights[disease_classes] = weights[disease_classes] / mean_weight
         weights = weights.clamp(max=max_weight)
         weights[0] = 1.0
+        # Explicitly set No Finding weight to 1.0
+        if "No Finding" in self.class_to_idx:
+            weights[self.class_to_idx["No Finding"]] = 0.5
 
         if verbose:
             reverse_mapping = {idx: name for name, idx in self.class_to_idx.items()}
@@ -442,7 +473,20 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             print(f"[RoI head weights] Weights: {weights}")
         return weights
 
-    def create_stratified_split(self, presence_prob_thresh: float = 0.1) -> tuple[List[str], List[str]]:
+    def create_stratified_splits(
+        self,
+        presence_prob_thresh: float = 0.1,
+        random_state: int = 42,
+    ) -> tuple[list[str], list[str], list[str]]:
+        cache_key = (
+            self._label_file,
+            self.test_split_ratio,
+            self.val_split_ratio,
+            random_state,
+        )
+        if cache_key in CanonicalDetectionDataset._SPLIT_CACHE:
+            return CanonicalDetectionDataset._SPLIT_CACHE[cache_key]
+
         all_image_ids = list(self.image_data.keys())
         n_images = len(all_image_ids)
         num_classes = self.get_num_classes()
@@ -456,16 +500,37 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                 for class_idx in present:
                     y[row_idx, class_idx] = 1
 
-        splitter = MultilabelStratifiedShuffleSplit(
-            n_splits=1,
-            test_size=self.test_split_ratio,
-            random_state=42, # DO NOT CHANGE THIS VALUE TO MAINTAIN REPRODUCIBILITY
-        )
         x_dummy = np.zeros((n_images, 1), dtype=np.int32)
-        train_idx, val_idx = next(splitter.split(x_dummy, y))
-        train_ids = [all_image_ids[index] for index in train_idx]
-        val_ids = [all_image_ids[index] for index in val_idx]
-        return train_ids, val_ids
+
+        # Stage 1: lock away test set (same seed/ratio as the old 80/20 split)
+        dev_idx, test_idx = next(
+            MultilabelStratifiedShuffleSplit(
+                n_splits=1,
+                test_size=self.test_split_ratio,
+                random_state=random_state,
+            ).split(x_dummy, y)
+        )
+
+        # Stage 2: split development pool into train / val
+        dev_y = y[dev_idx]
+        dev_x = x_dummy[dev_idx]
+        train_rel_idx, val_rel_idx = next(
+            MultilabelStratifiedShuffleSplit(
+                n_splits=1,
+                test_size=self.val_split_ratio,
+                random_state=random_state,
+            ).split(dev_x, dev_y)
+        )
+
+        train_idx = dev_idx[train_rel_idx]
+        val_idx = dev_idx[val_rel_idx]
+
+        train_ids = [all_image_ids[i] for i in train_idx]
+        val_ids = [all_image_ids[i] for i in val_idx]
+        test_ids = [all_image_ids[i] for i in test_idx]
+
+        CanonicalDetectionDataset._SPLIT_CACHE[cache_key] = (train_ids, val_ids, test_ids)
+        return train_ids, val_ids, test_ids
 
     def build_image_id_tensor(self, image_id: str) -> torch.Tensor:
         return torch.tensor([hash(image_id) % (2**31)])
@@ -504,8 +569,19 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             dominant_class = self.get_dominant_class(labels_data=[finding])
             if dominant_class == 0:
                 continue
+            # 0=background, 1=No Finding; skip both when ignoring NF clusters
+            if self.ignore_nofinding_clusters and dominant_class <= 1:
+                continue
 
             bbox = finding["bbox"]
+            # Full-image NF placeholder only when the whole image is pure no-finding
+            if (
+                dominant_class == 1
+                and self.is_placeholder_bbox(bbox)
+                and not self.is_pure_nofinding_image(image_id)
+            ):
+                continue
+
             norm_x, norm_y, norm_w, norm_h = bbox
             x = norm_x * orig_w
             y = norm_y * orig_h
@@ -539,6 +615,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             "labels": labels_tensor,
             "confidences": confidences,
             "image_id": self.build_image_id_tensor(image_id),
+            "original_image_id": image_id,
         }
         if self.transforms:
             image, target = self.transforms(image, target)
@@ -557,10 +634,13 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             spatial = label.get("spatial") or {}
             mean_box = spatial.get("mean")
             std_box = spatial.get("std")
+            # if not mean_box or not std_box or self.is_placeholder_mean_box(mean_box):
+            #     continue
+            # REMOVED: self.is_placeholder_mean_box(mean_box)
             if not mean_box or not std_box or self.is_placeholder_mean_box(mean_box):
                 continue
 
-            if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) == 0:
+            if self.ignore_nofinding_clusters and self.get_cluster_dominant_overall(label) <= 1:
                 continue
 
             x_mean = mean_box[0] * orig_w
@@ -581,9 +661,18 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
                 if rater_ids:
                     weight = float(sum(self.rater_weights.get(rater_id, 0.5) for rater_id in rater_ids) / len(rater_ids))
                 else:
-                    weight = max(float(1.0 - prob_vector[0].item()), 0.1)
+                    bg_prob = prob_vector[0].item() + (prob_vector[self.class_to_idx["No Finding"]].item() if "No Finding" in self.class_to_idx else 0)
+                    weight = max(float(1.0 - bg_prob), 0.1)
             else:
-                weight = max(float(1.0 - prob_vector[0].item()), 0.1)
+                bg_prob = prob_vector[0].item() + (prob_vector[self.class_to_idx["No Finding"]].item() if "No Finding" in self.class_to_idx else 0)
+                weight = max(float(1.0 - bg_prob), 0.1)
+
+            # NEW: Downweight if No Finding is the majority (handles singletons and full-image placeholders)
+            if "No Finding" in self.class_to_idx:
+                nf_idx = self.class_to_idx["No Finding"]
+                if prob_vector[nf_idx].item() > 0.5:
+                    weight = weight * max(float(1.0 - prob_vector[nf_idx].item()), 0.1)
+
             annotation_weights_list.append(weight)
 
             dominant_disease = self.get_cluster_dominant_disease(label)
@@ -614,6 +703,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             "gt_stds": gt_stds,
             "gt_class_probs": class_probs,
             "image_id": self.build_image_id_tensor(image_id),
+            "original_image_id": image_id,
             "annotation_weight": annotation_weight,
         }
         if self.transforms:
@@ -649,7 +739,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
 
             prob_vector = self.build_class_prob_vector(label.get("class_probs"))
             class_probs.append(prob_vector)
-            labels_tensor.append(self.get_cluster_dominant_disease(label) or 0)
+            labels_tensor.append(self.get_cluster_dominant_disease(label) or 1)
 
         if not boxes:
             boxes = torch.zeros((0, 4), dtype=torch.float32)
@@ -670,6 +760,7 @@ class CanonicalDetectionDataset(DetectionDatasetPort):
             "gt_covariances": gt_covariances,
             "gt_class_probs": class_probs,
             "image_id": self.build_image_id_tensor(image_id),
+            "original_image_id": image_id,
         }
         if self.transforms:
             image, target = self.transforms(image, target)

@@ -74,36 +74,83 @@ class ProbabilisticRoIHeads(RoIHeads):
         # --- Custom Loss Calculation in Training ---
         if self.training:
             # -----------------------------
-            # 1) Targets for positives
+            # 1) Targets for all sampled RoIs
             # -----------------------------
             all_labels = torch.cat(labels, dim=0)
-            positive_proposals_indices = torch.where(all_labels > 0)[0]
-            num_pos = positive_proposals_indices.shape[0]
+            matched_positive_indices = torch.where(all_labels > 0)[0]
+            pathology_positive_indices = torch.where(all_labels > 1)[0]
+            num_pathology_pos = pathology_positive_indices.shape[0]
             num_classes = class_logits.shape[1]
 
-            if num_pos == 0:
-                device = class_logits.device
+            cls_targets = torch.zeros_like(class_logits)
+            sample_weights = torch.ones((class_logits.shape[0],), device=class_logits.device)
+            cls_targets[all_labels == 0, 0] = 1.0
+
+            matched_gt_class_probs_list = []
+            matched_ann_weights_list = []
+            for i in range(len(targets)):
+                matched_pos_mask_i = labels[i] > 0
+                if matched_pos_mask_i.sum() == 0:
+                    continue
+                gt_idx_i = matched_idxs[i][matched_pos_mask_i]
+                matched_gt_class_probs_list.append(targets[i]["gt_class_probs"][gt_idx_i])
+                matched_ann_weights_list.append(targets[i]["annotation_weight"][gt_idx_i])
+
+            if matched_positive_indices.numel() > 0:
+                matched_gt_class_probs = torch.cat(matched_gt_class_probs_list, dim=0)
+                matched_ann_weights = torch.cat(matched_ann_weights_list, dim=0)
+                cls_targets[matched_positive_indices] = matched_gt_class_probs
+                sample_weights[matched_positive_indices] = matched_ann_weights
+
+            LAMBDA_CLS = 1.0
+            POS_CLS_WEIGHT = 2.0
+            NEG_CLS_WEIGHT = 0.5
+            per_sample_ce = soft_cross_entropy_loss(
+                class_logits,
+                cls_targets,
+                class_weights=self.class_weights,
+                reduction="none",
+            )
+            pos_mask = all_labels > 0
+            neg_mask = all_labels == 0
+            if pos_mask.any():
+                pos_loss = (per_sample_ce[pos_mask] * sample_weights[pos_mask]).mean()
+            else:
+                pos_loss = class_logits.sum() * 0.0
+            if neg_mask.any():
+                neg_loss = per_sample_ce[neg_mask].mean()
+            else:
+                neg_loss = class_logits.sum() * 0.0
+            loss_classifier = (POS_CLS_WEIGHT * pos_loss + NEG_CLS_WEIGHT * neg_loss) * LAMBDA_CLS
+            # per_sample_ce = soft_cross_entropy_loss(
+            #     class_logits,
+            #     cls_targets,
+            #     class_weights=self.class_weights,
+            #     reduction="none",
+            # )
+            # loss_classifier = (per_sample_ce * sample_weights).mean() * LAMBDA_CLS
+
+            if num_pathology_pos == 0:
                 losses = {
-                    "loss_probabilistic_classifier": torch.tensor(0.0, device=device, requires_grad=True),
-                    "loss_box_var": torch.tensor(0.0, device=device, requires_grad=True),
-                    "loss_box_mean": torch.tensor(0.0, device=device, requires_grad=True),
+                    "loss_probabilistic_classifier": loss_classifier,
+                    "loss_box_var": class_logits.sum() * 0.0,
+                    "loss_box_mean": class_logits.sum() * 0.0,
                 }
                 return result, losses
 
-            pos_labels = all_labels[positive_proposals_indices]  # [N_pos]
-            pos_class_logits = class_logits[positive_proposals_indices]  # [N_pos, C]
-            pos_gmm_params = gmm_params[positive_proposals_indices]      # [N_pos, C*8]
+            pos_labels = all_labels[pathology_positive_indices]  # [N_pathology_pos]
+            pos_gmm_params = gmm_params[pathology_positive_indices]      # [N_pathology_pos, C*8]
 
             # torchvision regression targets (already in [dx,dy,dw,dh] box-coder space)
             reg_targets = torch.cat(regression_targets, dim=0)          # [N_total, 4]
-            pos_reg_targets = reg_targets[positive_proposals_indices]    # [N_pos, 4]
+            pos_reg_targets = reg_targets[pathology_positive_indices]    # [N_pathology_pos, 4]
 
             # -----------------------------
             # 2) Predicted means/vars (in delta space!)
             # -----------------------------
-            pos_gmm_params = pos_gmm_params.reshape(num_pos, num_classes, 8)
-            pred_means_delta = pos_gmm_params[torch.arange(num_pos, device=pos_gmm_params.device), pos_labels, :4]
-            raw_log_vars = pos_gmm_params[torch.arange(num_pos), pos_labels, 4:]
+            pos_gmm_params = pos_gmm_params.reshape(num_pathology_pos, num_classes, 8)
+            pred_means_delta = pos_gmm_params[torch.arange(num_pathology_pos, device=pos_gmm_params.device), pos_labels, :4]
+            raw_log_vars = pos_gmm_params[torch.arange(num_pathology_pos, device=pos_gmm_params.device), pos_labels, 4:]
             pred_log_vars_delta = torch.clamp(raw_log_vars, min=-10.0, max=10.0)
 
             # -----------------------------
@@ -115,15 +162,15 @@ class ProbabilisticRoIHeads(RoIHeads):
             gt_stds_delta_list = []
 
             for i in range(len(targets)):
-                pos_mask = labels[i] > 0
+                pos_mask = labels[i] > 1
                 if pos_mask.sum() == 0:
                     continue
 
-                props_i = proposals[i][pos_mask]  # [N_pos_i,4] in resized pixels
+                props_i = proposals[i][pos_mask]  # [N_pathology_pos_i,4] in resized pixels
                 gt_idx_i = matched_idxs[i][pos_mask]
-                gt_boxes_i = targets[i]["boxes"][gt_idx_i]  # [N_pos_i,4] in resized pixels
+                gt_boxes_i = targets[i]["boxes"][gt_idx_i]  # [N_pathology_pos_i,4] in resized pixels
 
-                gt_stds_norm_i = targets[i]["gt_stds"][gt_idx_i]  # [N_pos_i,4] normalized stds (x,y,w,h)
+                gt_stds_norm_i = targets[i]["gt_stds"][gt_idx_i]  # [N_pathology_pos_i,4] normalized stds (x,y,w,h)
                 h_i, w_i = image_shapes[i]  # (H, W) of resized image
                 scale_i = gt_stds_norm_i.new_tensor([w_i, h_i, w_i, h_i])
                 gt_stds_px_i = gt_stds_norm_i * scale_i
@@ -165,7 +212,7 @@ class ProbabilisticRoIHeads(RoIHeads):
                 gt_boxes_list.append(gt_boxes_i)
                 gt_stds_delta_list.append(gt_stds_delta_i)
 
-            gt_stds_delta = torch.cat(gt_stds_delta_list, dim=0)  # [N_pos,4]
+            gt_stds_delta = torch.cat(gt_stds_delta_list, dim=0)  # [N_pathology_pos,4]
             # Scale GT stds into the same space the model predicts in (BoxCoder weights)
             REG_WEIGHTS = gt_stds_delta.new_tensor([10.0, 10.0, 5.0, 5.0])
             gt_stds_delta_scaled = gt_stds_delta * REG_WEIGHTS          # [N_pos, 4]
@@ -173,7 +220,11 @@ class ProbabilisticRoIHeads(RoIHeads):
             # -----------------------------
             # 5a) Smooth L1 loss on means (direct localization anchor)
             # -----------------------------
+<<<<<<< HEAD
             LAMBDA_MEAN = getattr(self, "lambda_mean", 2.0)
+=======
+            LAMBDA_MEAN = 12.0
+>>>>>>> origin/main
             loss_box_mean = torch.nn.functional.smooth_l1_loss(
                 pred_means_delta,
                 pos_reg_targets,
@@ -192,7 +243,11 @@ class ProbabilisticRoIHeads(RoIHeads):
             pred_log_stds = 0.5 * pred_log_vars_delta                       # [N_pos, 4]
             gt_log_stds = torch.log(gt_stds_delta_safe)                      # [N_pos, 4]
             
+<<<<<<< HEAD
             LAMBDA_VAR = getattr(self, "lambda_var", 1.0)
+=======
+            LAMBDA_VAR = 2.0
+>>>>>>> origin/main
             loss_box_var = torch.nn.functional.smooth_l1_loss(
                 pred_log_stds,
                 gt_log_stds,
@@ -200,6 +255,7 @@ class ProbabilisticRoIHeads(RoIHeads):
                 reduction="mean",
             ) * LAMBDA_VAR
             # -----------------------------
+<<<<<<< HEAD
             # 6) Classification loss = soft cross entropy over ALL proposals
             # (positive + negative)
             # -----------------------------
@@ -256,6 +312,8 @@ class ProbabilisticRoIHeads(RoIHeads):
             loss_classifier = (per_sample_ce * ann_weights).mean() * LAMBDA_CLS
 
             # -----------------------------
+=======
+>>>>>>> origin/main
             # 7) Final losses
             # -----------------------------
 
@@ -355,24 +413,23 @@ class ProbabilisticRoIHeads(RoIHeads):
                 pred_boxes_i = self.box_ops.clip_boxes_to_image(pred_boxes_i.reshape(-1, 4), img_shape)
                 pred_boxes_i = pred_boxes_i.view(-1, num_classes, 4)
                 
-                # Remove background class predictions (class 0)
-                boxes_i = pred_boxes_i[:, 1:]      # [num_proposals, num_classes-1, 4]
+                # Emit only pathology classes as detections. Class 0 is background;
+                # class 1 ("No Finding") is represented by probability mass, not a box.
+                boxes_i = pred_boxes_i[:, 1:]      # [num_proposals, num_pathology_classes, 4]
                 scores_i_full = scores_i.clone()   # [num_proposals, num_classes] - KEEP FULL PROBABILITIES
-                scores_i = scores_i[:, 1:]         # [num_proposals, num_classes-1]
-                stds_i = stds_i[:, 1:]             # [num_proposals, num_classes-1, 4]
-                
-                # Flatten for NMS processing
+                scores_i = scores_i[:, 1:]         # [num_proposals, num_pathology_classes]
+                stds_i = stds_i[:, 1:]             # [num_proposals, num_pathology_classes, 4]
+
                 boxes_flat = boxes_i.reshape(-1, 4)
                 scores_flat = scores_i.reshape(-1)
                 stds_flat = stds_i.reshape(-1, 4)
 
-                num_proposals = scores_i_full.shape[0]
-                num_fg_classes = num_classes - 1  # excluding background
-                probs_flat = scores_i_full.unsqueeze(1).expand(-1, num_fg_classes, -1).reshape(-1, num_classes)
-                
-                # Create labels (1-indexed, since we removed background)
+                num_pathology_classes = num_classes - 1
+                probs_flat = scores_i_full.unsqueeze(1).expand(-1, num_pathology_classes, -1).reshape(-1, num_classes)
+
                 labels_flat = torch.arange(1, num_classes, device=scores_i.device)
                 labels_flat = labels_flat.view(1, -1).expand(boxes_i.shape[0], -1).reshape(-1)
+<<<<<<< HEAD
                 
                 
                 # Stage 1: gate on pathology confidence vs no-finding confidence
@@ -384,6 +441,11 @@ class ProbabilisticRoIHeads(RoIHeads):
                 nofinding_mask = (nofinding_score > self.score_thresh) & ~pathology_mask
                 fg_mask = pathology_mask | nofinding_mask
                 if fg_mask.sum() == 0:
+=======
+
+                keep = scores_flat > self.score_thresh
+                if keep.sum() == 0:
+>>>>>>> origin/main
                     result.append({
                         "boxes":       torch.empty((0, 4), device=gmm_params.device),
                         "labels":      torch.empty((0,), dtype=torch.int64, device=gmm_params.device),
@@ -392,6 +454,7 @@ class ProbabilisticRoIHeads(RoIHeads):
                         "class_probs": torch.empty((0, num_classes), device=gmm_params.device),
                     })
                     continue
+<<<<<<< HEAD
                 # Filter all per-proposal tensors
                 boxes_fg    = boxes_i[fg_mask]           # [M, C-1, 4]
                 stds_fg     = stds_i[fg_mask]            # [M, C-1, 4]
@@ -419,15 +482,30 @@ class ProbabilisticRoIHeads(RoIHeads):
                 stds_out  = stds_fg.gather(1, idx.expand(-1, -1, 4)).squeeze(1)    # [M, 4]
                 # Stage 3: NMS on foreground confidence
                 keep = torchvision.ops.nms(boxes_out, fg_conf_fg, self.nms_thresh)
+=======
+
+                boxes_flat = boxes_flat[keep]
+                scores_flat = scores_flat[keep]
+                stds_flat = stds_flat[keep]
+                labels_flat = labels_flat[keep]
+                probs_flat = probs_flat[keep]
+
+                keep = torchvision.ops.batched_nms(
+                    boxes_flat,
+                    scores_flat,
+                    labels_flat,
+                    self.nms_thresh,
+                )
+>>>>>>> origin/main
                 keep = keep[:self.detections_per_img]
 
 
                 result.append({
-                    "boxes":       boxes_out[keep],
-                    "labels":      labels_out[keep],
-                    "scores":      fg_conf_fg[keep],
-                    "bbox_stds":   stds_out[keep],
-                    "class_probs": full_probs_fg[keep],
+                    "boxes":       boxes_flat[keep],
+                    "labels":      labels_flat[keep],
+                    "scores":      scores_flat[keep],
+                    "bbox_stds":   stds_flat[keep],
+                    "class_probs": probs_flat[keep],
                 })
             
         return result, losses
@@ -482,7 +560,11 @@ class HardLabelRoIHeads(RoIHeads):
             # Build one-hot targets for soft_focal_loss
             # gt_class_probs = torch.nn.functional.one_hot(labels.clamp_min(0), num_classes=class_logits.shape[1]).float()
             
+<<<<<<< HEAD
             LAMBDA_CLS = getattr(self, "lambda_cls", 2.0)
+=======
+            LAMBDA_CLS = 2.0
+>>>>>>> origin/main
             # class_weights = getattr(self, "class_weights", None)
             # class_weights = class_weights.to(device = class_logits.device, dtype = class_logits.dtype) if class_weights is not None else None
 
@@ -494,7 +576,11 @@ class HardLabelRoIHeads(RoIHeads):
             N = class_logits.shape[0]
             box_regression = box_regression.reshape(N, -1, 4)
             
+<<<<<<< HEAD
             LAMBDA_BOX_REG = getattr(self, "lambda_box_reg", 4.0)
+=======
+            LAMBDA_BOX_REG = 4.0
+>>>>>>> origin/main
             loss_box_reg = torch.nn.functional.smooth_l1_loss(
                 box_regression[sampled_pos_inds_subset, labels_pos],
                 regression_targets[sampled_pos_inds_subset],
@@ -535,6 +621,11 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
     elif backbone_name == 'mobilenet':
         backbone = torchvision.models.mobilenet_v3_large(pretrained=pretrained).features
         backbone.out_channels = 960
+    
+    elif backbone_name in ('swin_t', 'swin_s', 'swin_b', 'swin_v2_t', 'swin_v2_s', 'swin_v2_b'):
+        from softlabel_od.object_detection.adapters.model_components.swin_fpn_backbone import swin_fpn_backbone
+        backbone = swin_fpn_backbone(backbone_name, pretrained=pretrained, out_channels=256)
+
         
     else:
         raise ValueError(f"Backbone '{backbone_name}' is not supported.")
@@ -545,7 +636,17 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
     # aspect_ratios = ((0.33, 0.5, 0.75, 1.0, 2.0, 3.0),) * 5
     # anchor_generator = AnchorGenerator(sizes=anchor_sizes, aspect_ratios=aspect_ratios)
 
-    anchor_generator = create_anchor_generator(anchor_sizes, anchor_aspect_ratios*len(anchor_sizes))
+    # anchor_generator = create_anchor_generator(anchor_sizes, anchor_aspect_ratios*len(anchor_sizes))
+    if anchor_sizes is None:
+        anchor_sizes = [[32], [64], [128], [256], [512]]
+
+    if anchor_aspect_ratios is None:
+        anchor_aspect_ratios = [[0.33, 0.5, 0.75, 1.0, 2.0, 3.0]]
+
+    if len(anchor_aspect_ratios) == 1:
+        anchor_aspect_ratios = anchor_aspect_ratios * len(anchor_sizes)
+
+    anchor_generator = create_anchor_generator(anchor_sizes, anchor_aspect_ratios)
 
     # Create the model using the specified backbone
     model = FasterRCNN(
@@ -576,7 +677,7 @@ def get_model_1d(num_classes, backbone_name='resnet50', pretrained=True, probabi
             fg_iou_thresh=0.5, bg_iou_thresh=0.5,
             batch_size_per_image=512, positive_fraction=0.25,
             bbox_reg_weights=[10, 10, 5, 5], # [dx, dy, dw, dh] scaled at inference time
-            score_thresh=0.6, nms_thresh=0.4, detections_per_img=200    # keep nms_thresh=0.3-0.5
+            score_thresh=0.3, nms_thresh=0.5, detections_per_img=150    # keep nms_thresh=0.3-0.5
         )
 
     else:

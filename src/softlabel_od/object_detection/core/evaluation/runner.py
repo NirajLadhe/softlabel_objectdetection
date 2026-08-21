@@ -70,6 +70,8 @@ def collect_predictions(model, data_loader, device, is_probabilistic):
                 'labels': target['labels'].cpu().numpy(),
                 'image_size': (img_h, img_w),
             }
+            if 'original_image_id' in target:
+                gt_entry['image_id'] = target['original_image_id']
             if 'gt_class_probs' in target:
                 gt_entry['gt_class_probs'] = target['gt_class_probs'].cpu().numpy()
             if 'gt_stds' in target:
